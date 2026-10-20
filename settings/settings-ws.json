@@ -1,12 +1,12 @@
 [
   {
     "name": "LAW_ID",
-    "value": "2f69d102-b7c5-4584-b24f-6b62ba82646f",
+    "value": "<LOG_ANALYTICS_WORKSPACE_ID>",
     "slotSetting": false
   },
   {
     "name": "OUT_BLOB_URI",
-    "value": "https://lawexpodbw7dmdqf7e4u.blob.core.windows.net",
+    "value": "https://<OUTPUT_STORAGE_ACCOUNT_NAME>.blob.core.windows.net",
     "slotSetting": false
   },
   {

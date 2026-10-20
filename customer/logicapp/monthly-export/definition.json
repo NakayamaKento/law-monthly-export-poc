@@ -1,0 +1,410 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "triggers": {
+    "Monthly_JST_5th_0900": {
+      "type": "Recurrence",
+      "recurrence": {
+        "frequency": "Month",
+        "interval": 1,
+        "timeZone": "Tokyo Standard Time",
+        "schedule": {
+          "monthDays": [
+            5
+          ],
+          "hours": [
+            9
+          ],
+          "minutes": [
+            0
+          ]
+        }
+      },
+      "evaluatedRecurrence": {
+        "frequency": "Month",
+        "interval": 1,
+        "timeZone": "Tokyo Standard Time",
+        "schedule": {
+          "monthDays": [
+            5
+          ],
+          "hours": [
+            9
+          ],
+          "minutes": [
+            0
+          ]
+        }
+      }
+    }
+  },
+  "actions": {
+    "Export": {
+      "type": "Scope",
+      "runAfter": {},
+      "actions": {
+        "Settings_Columns": {
+          "type": "Compose",
+          "runAfter": {},
+          "inputs": "@split(appsetting('COLUMNS'), ',')"
+        },
+        "Settings_KqlBody": {
+          "type": "Compose",
+          "runAfter": {
+            "Settings_Columns": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@appsetting('KQL_BODY')"
+        },
+        "StartJst": {
+          "type": "Compose",
+          "runAfter": {
+            "Settings_KqlBody": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@if(empty(appsetting('MONTH_OVERRIDE')), addToTime(formatDateTime(convertTimeZone(utcNow(),'UTC','Tokyo Standard Time'),'yyyy-MM-01T00:00:00'),-1,'Month','yyyy-MM-ddTHH:mm:ss'), concat(appsetting('MONTH_OVERRIDE'),'-01T00:00:00'))"
+        },
+        "EndJst": {
+          "type": "Compose",
+          "runAfter": {
+            "StartJst": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@addToTime(outputs('StartJst'),1,'Month','yyyy-MM-ddTHH:mm:ss')"
+        },
+        "StartUtc": {
+          "type": "Compose",
+          "runAfter": {
+            "EndJst": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@convertTimeZone(outputs('StartJst'),'Tokyo Standard Time','UTC','yyyy-MM-ddTHH:mm:ss')"
+        },
+        "EndUtc": {
+          "type": "Compose",
+          "runAfter": {
+            "StartUtc": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@convertTimeZone(outputs('EndJst'),'Tokyo Standard Time','UTC','yyyy-MM-ddTHH:mm:ss')"
+        },
+        "Month": {
+          "type": "Compose",
+          "runAfter": {
+            "EndUtc": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@substring(outputs('StartJst'),0,7)"
+        },
+        "QueryText": {
+          "type": "Compose",
+          "runAfter": {
+            "Month": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@concat('let start=datetime(', outputs('StartUtc'), '); let end=datetime(', outputs('EndUtc'), '); ', outputs('Settings_KqlBody'))"
+        },
+        "Query": {
+          "type": "Http",
+          "runAfter": {
+            "QueryText": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "method": "POST",
+            "uri": "https://api.loganalytics.azure.com/v1/workspaces/@{appsetting('LAW_ID')}/query",
+            "headers": {
+              "Content-Type": "application/json",
+              "Prefer": "wait=180"
+            },
+            "body": {
+              "query": "@outputs('QueryText')"
+            },
+            "authentication": {
+              "type": "ManagedServiceIdentity",
+              "audience": "https://api.loganalytics.io"
+            },
+            "retryPolicy": {
+              "type": "fixed",
+              "count": 3,
+              "interval": "PT30S"
+            }
+          }
+        },
+        "Check_Query_Error": {
+          "type": "If",
+          "runAfter": {
+            "Query": [
+              "Succeeded"
+            ]
+          },
+          "expression": {
+            "and": [
+              {
+                "not": {
+                  "equals": [
+                    "@empty(body('Query')?['error'])",
+                    true
+                  ]
+                }
+              }
+            ]
+          },
+          "actions": {
+            "Terminate_QueryError": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "QueryError",
+                  "message": "Log Analytics returned error/PartialError"
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          }
+        },
+        "Rows": {
+          "type": "Compose",
+          "runAfter": {
+            "Check_Query_Error": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@coalesce(body('Query')?['tables']?[0]?['rows'], json('[]'))"
+        },
+        "RowCount": {
+          "type": "Compose",
+          "runAfter": {
+            "Rows": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@length(outputs('Rows'))"
+        },
+        "Check_Row_Cap": {
+          "type": "If",
+          "runAfter": {
+            "RowCount": [
+              "Succeeded"
+            ]
+          },
+          "expression": {
+            "and": [
+              {
+                "greaterOrEquals": [
+                  "@outputs('RowCount')",
+                  500000
+                ]
+              }
+            ]
+          },
+          "actions": {
+            "Terminate_RowCap": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "RowCap",
+                  "message": "Row count reached API limit; split the window"
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          }
+        },
+        "Records": {
+          "type": "Select",
+          "runAfter": {
+            "Check_Row_Cap": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "from": "@outputs('Rows')",
+            "select": "@json(string(item()?[0]))"
+          }
+        },
+        "Create_CSV_table": {
+          "type": "Table",
+          "runAfter": {
+            "Records": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "from": "@body('Records')",
+            "format": "CSV"
+          }
+        },
+        "CsvText": {
+          "type": "Compose",
+          "runAfter": {
+            "Create_CSV_table": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@if(equals(outputs('RowCount'),0), concat(join(outputs('Settings_Columns'),','), decodeUriComponent('%0D%0A')), body('Create_CSV_table'))"
+        },
+        "Check_Header": {
+          "type": "If",
+          "runAfter": {
+            "CsvText": [
+              "Succeeded"
+            ]
+          },
+          "expression": {
+            "and": [
+              {
+                "not": {
+                  "equals": [
+                    "@trim(first(split(outputs('CsvText'), decodeUriComponent('%0A'))))",
+                    "@join(outputs('Settings_Columns'),',')"
+                  ]
+                }
+              }
+            ]
+          },
+          "actions": {
+            "Terminate_SchemaMismatch": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "SchemaMismatch",
+                  "message": "CSV header differs from expected columns"
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          }
+        },
+        "Upload_CSV": {
+          "type": "Http",
+          "runAfter": {
+            "Check_Header": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "method": "PUT",
+            "uri": "@{appsetting('OUT_BLOB_URI')}/exports/@{outputs('Month')}/runs/@{workflow().run.name}/export.csv",
+            "headers": {
+              "x-ms-blob-type": "BlockBlob",
+              "x-ms-version": "2023-11-03",
+              "Content-Type": "text/csv; charset=utf-8"
+            },
+            "body": "@concat(uriComponentToString('%EF%BB%BF'), outputs('CsvText'))",
+            "authentication": {
+              "type": "ManagedServiceIdentity",
+              "audience": "https://storage.azure.com/"
+            },
+            "retryPolicy": {
+              "type": "fixed",
+              "count": 3,
+              "interval": "PT10S"
+            }
+          }
+        },
+        "Upload_Manifest": {
+          "type": "Http",
+          "runAfter": {
+            "Upload_CSV": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "method": "PUT",
+            "uri": "@{appsetting('OUT_BLOB_URI')}/exports/@{outputs('Month')}/runs/@{workflow().run.name}/manifest.json",
+            "headers": {
+              "x-ms-blob-type": "BlockBlob",
+              "x-ms-version": "2023-11-03",
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "month": "@{outputs('Month')}",
+              "runId": "@{workflow().run.name}",
+              "windowStartUtc": "@{outputs('StartUtc')}",
+              "windowEndUtc": "@{outputs('EndUtc')}",
+              "rowCount": "@outputs('RowCount')",
+              "files": [
+                "export.csv"
+              ],
+              "completedAtUtc": "@{utcNow()}"
+            },
+            "authentication": {
+              "type": "ManagedServiceIdentity",
+              "audience": "https://storage.azure.com/"
+            },
+            "retryPolicy": {
+              "type": "fixed",
+              "count": 3,
+              "interval": "PT10S"
+            }
+          }
+        },
+        "Upload_Current": {
+          "type": "Http",
+          "runAfter": {
+            "Upload_Manifest": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "method": "PUT",
+            "uri": "@{appsetting('OUT_BLOB_URI')}/exports/@{outputs('Month')}/current.json",
+            "headers": {
+              "x-ms-blob-type": "BlockBlob",
+              "x-ms-version": "2023-11-03",
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "runId": "@{workflow().run.name}",
+              "path": "@{outputs('Month')}/runs/@{workflow().run.name}/"
+            },
+            "authentication": {
+              "type": "ManagedServiceIdentity",
+              "audience": "https://storage.azure.com/"
+            },
+            "retryPolicy": {
+              "type": "fixed",
+              "count": 3,
+              "interval": "PT10S"
+            }
+          }
+        }
+      }
+    },
+    "Fail_if_Export_Failed": {
+      "type": "Terminate",
+      "runAfter": {
+        "Export": [
+          "Failed",
+          "TimedOut"
+        ]
+      },
+      "inputs": {
+        "runStatus": "Failed",
+        "runError": {
+          "code": "ExportFailed",
+          "message": "Export scope failed; previous current.json is unchanged"
+        }
+      }
+    }
+  },
+  "outputs": {}
+}

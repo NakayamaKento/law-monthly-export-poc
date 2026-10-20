@@ -3,6 +3,7 @@ targetScope = 'resourceGroup'
 param location string = resourceGroup().location
 param prefix string = 'lawexp'
 param uniq string = uniqueString(resourceGroup().id)
+param retentionInDays int = 30
 
 var vnetName = '${prefix}-vnet'
 var hostSaName = toLower('${prefix}h${uniq}')
@@ -174,7 +175,7 @@ resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   location: location
   properties: {
     sku: { name: 'PerGB2018' }
-    retentionInDays: 30
+    retentionInDays: retentionInDays
     publicNetworkAccessForIngestion: 'Disabled'
     publicNetworkAccessForQuery: 'Disabled'
   }
