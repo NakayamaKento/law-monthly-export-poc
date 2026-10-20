@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": { "value": "southeastasia" },
+    "vnetName": { "value": "<FOUNDATION_OUTPUT_VNET_NAME>" },
+    "hostSaName": { "value": "<FOUNDATION_OUTPUT_HOST_STORAGE_NAME>" },
+    "uamiName": { "value": "<FOUNDATION_OUTPUT_UAMI_NAME>" },
+    "appName": { "value": "<GLOBALLY_UNIQUE_LOGIC_APP_NAME>" },
+    "planName": { "value": "<WORKFLOW_SERVICE_PLAN_NAME>" }
+  }
+}

@@ -5,6 +5,7 @@ param vnetName string = 'lawexp-vnet'
 param hostSaName string
 param uamiName string = 'lawexp-host-mi'
 param appName string = 'lawexp-ws'
+param planName string = 'lawexp-ws-plan'
 param contentShareMode string = 'none'
 
 resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
@@ -12,7 +13,7 @@ resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' exis
 }
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
-  name: 'lawexp-ws-plan'
+  name: planName
   location: location
   sku: { name: 'WS1', tier: 'WorkflowStandard' }
   kind: 'elastic'

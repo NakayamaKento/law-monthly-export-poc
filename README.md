@@ -3,6 +3,17 @@
 Log Analytics のログを月次で CSV にエクスポートし、非公開の Blob Storage に保管する自動化の PoC です。
 Logic Apps Standard（HTTP アクション + マネージド ID）で Log Analytics Query API を呼び、キー認証・パブリックアクセスなしで動作することを Southeast Asia で検証しました。
 
+## 顧客向けサンプル
+
+配布対象は **[customer/](customer/)** です。[顧客向け README](customer/README.md) から、portal のみの導入・実行・CSV 取得・受入確認・削除の順に読めます。ARM JSON・設定例・ワークフローを同梱しています。
+
+- 主構成は **WS1**。ただしホスト Storage のキー無効化は公式資料の記載と異なり、**サポート範囲確認が導入前の必須条件**です。
+- 過去 PoC の動作実績と、今回の配布資材・portal 手順の検証状態を分けています。portal 実機受入は未実施です。
+- Azure リソースの作成はサポート確認と構成・費用・権限の個別承認後に行います。
+- 生成元と提供者向けの再生成・静的検証は [保守手順](docs/customer-maintenance.md) を参照してください。
+
+以下は提供者向けの元 PoC 構成・参考情報です。顧客に CLI 実行を求める手順ではありません。
+
 結果の詳細・設計・検証手順は [docs/plan.md](docs/plan.md)（§12 ASE v3、§13 Workflow Service Plan）を参照してください。
 これまでの経緯・お客様の制約・決定事項・未解決事項・次の作業は [docs/CONTEXT.md](docs/CONTEXT.md) にまとめています。Copilot 向けの指示は [.github/copilot-instructions.md](.github/copilot-instructions.md) です。
 
@@ -17,7 +28,7 @@ Logic Apps Standard（HTTP アクション + マネージド ID）で Log Analyt
 | `settings/` | アプリ設定（LAW_ID、OUT_BLOB_URI、KQL_BODY、MONTH_OVERRIDE など）のサンプル |
 | `scripts/` | 手動実行・管理 VM からの読み戻し・外部遮断確認用スクリプト |
 
-## 使い方（概要）
+## 提供者向けの元 PoC 操作（参考、顧客向けではない）
 
 1. `az group create`、`az deployment group create -f infra/foundation.bicep` で基盤を作成
 2. WS 構成: `snet-integ`（10.50.4.0/24、Microsoft.Web/serverFarms 委任）を作り `infra/app-ws.bicep` をデプロイ
