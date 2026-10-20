@@ -4,6 +4,7 @@ Log Analytics のログを月次で CSV にエクスポートし、非公開の 
 Logic Apps Standard（HTTP アクション + マネージド ID）で Log Analytics Query API を呼び、キー認証・パブリックアクセスなしで動作することを Southeast Asia で検証しました。
 
 結果の詳細・設計・検証手順は [docs/plan.md](docs/plan.md)（§12 ASE v3、§13 Workflow Service Plan）を参照してください。
+これまでの経緯・お客様の制約・決定事項・未解決事項・次の作業は [docs/CONTEXT.md](docs/CONTEXT.md) にまとめています。Copilot 向けの指示は [.github/copilot-instructions.md](.github/copilot-instructions.md) です。
 
 ## 構成
 
