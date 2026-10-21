@@ -4,7 +4,7 @@
 
 Log Analytics の前月分ログをAzureサービスで毎月抽出し、CSVとして非公開Blob Storageに保存する。運用担当者がAzure portalのブラウザー操作で構築・運用でき、端末へのAzure CLI／Az PowerShell導入やローカルコマンド実行を不要とする。
 
-本書の §1～§11 は当初の設計・検証計画、§12・§13 は実機検証の記録、§14 は顧客提供資料の整備状況である。過去の計画と現在の検証結果を区別する。有償リソースの新規作成には対象サブスクリプション・構成・費用・権限の追加承認を必要とする。
+**現行は §22 の Consumption 版。§1～§21 は過去の計画・実績・再検討の履歴であり、以下の「現在」「最新」は各記録時点を指す。** 本書の §1～§11 は当初の設計・検証計画、§12・§13 は実機検証の記録、§14 は当時の顧客提供資料の整備状況である。過去の計画と現在の検証結果を区別する。有償リソースの新規作成には対象サブスクリプション・構成・費用・権限の追加承認を必要とする。
 
 現在の顧客提供方針は **WS1 を主サンプルとし、公式サポート範囲の確認を導入前の必須条件とする**。当初の ASE 推奨や WS 不採用の記述は当時の判断として残す。顧客向け入口は [customer/README.md](../customer/README.md)。
 
@@ -372,7 +372,7 @@ Workspaceの公開取り込み禁止は維持する。サンプル取り込み�
 - Azure Files のコンテンツ共有を設定しない顧客用 WS1 では **File PE・File DNS ゾーン・その VNet リンクを除外**。一般的な Standard の File 接続不要を示すものではなく、コンテンツ共有なし構成のサポート確認は引き続き必要。
 - 顧客用では ASE・管理 VM・Bastion 用の未使用予約サブネットも除外。PE 用と第 2 段階の VNet 統合用のみを作成する。管理経路が別途必要な場合は別設計・承認とする。
 - AMPLS は公式の 5 DNS ゾーンを維持。問い合わせごとに全ゾーンを使うという主張ではなく、公式の PE / DNS 関連付けを維持する判断。Blob DNS はホスト・出力・AMPLS で共用する。
-- 共有の [foundation.bicep](../infra/foundation.bicep) に `hostingMode` を追加。既定 `ase` は元 PoC のリソース集合を維持、[顧客用ラッパー](../infra/customer/01-foundation.bicep) のみ `ws` を指定して縮小する。
+- 当時の共有 `infra/foundation.bicep` に `hostingMode` を追加。既定 `ase` は元 PoC のリソース集合を維持、当時の顧客用ラッパーのみ `ws` を指定して縮小した。これらの Standard 用資材は §22 の切替で現行から除去した。
 
 ### 最小構成の内訳
 
@@ -470,7 +470,7 @@ DNS は Storage 3 ゾーン、Monitor 系 4 ゾーン、サイト 1 ゾーンの
 | 不正 KQL | Failed。同様に current 不変と直前成功 CSV を再照合 |
 | 明示再起動 | connections の保持と再実行・4 件の読み戻し成功。さらに別の再起動で host / connections / workflow の各 JSON が変更なく残ることを比較し、**本体を再配置せず**手動実行・4 件の独立読み戻しまで成功 |
 
-CSV パーサーで論理レコードを読み、列順・全 Id / UTC 日時 / Text、日本語・カンマ・引用符・埋め込み改行、UTF-8 BOM を比較した。Storage の Content-MD5 と取得バイトの MD5、保存サイズも一致。manifest の rowCount は JSON 数値で、month / UTC 窓 / runId / files、current の runId / path が一致した。1 月 CSV の SHA-256 は `63d0f75b814db2df09bab7992bbcbb8833f5f517fc35e3654a4ab43bddc1d3a6`。他月のハッシュは[顧客向け受入確認](../customer/docs/validation.md)に記載。
+CSV パーサーで論理レコードを読み、列順・全 Id / UTC 日時 / Text、日本語・カンマ・引用符・埋め込み改行、UTF-8 BOM を比較した。Storage の Content-MD5 と取得バイトの MD5、保存サイズも一致。manifest の rowCount は JSON 数値で、month / UTC 窓 / runId / files、current の runId / path が一致した。1 月 CSV の SHA-256 は `63d0f75b814db2df09bab7992bbcbb8833f5f517fc35e3654a4ab43bddc1d3a6`。0 件月は `2530c301ce1cfd79368bbcca96660ba539234c2e51dafd4e05846386a7f8b3b4`、2 月は `1386801db0e5e71a7e18e9660da407a203d38793a0ebb897430b30935f953cf3`。いずれも旧 WS1 の実測で、Consumption の合格値には流用しない。
 
 組み込み uploadBlob は CSV / JSON とも MIME を `text/plain; charset=utf-8` として保存した。旧 HTTP 版の `text/csv` / `application/json` とは異なるが、本文・BOM・拡張子は正しい。顧客運用手順にもこの差異を記載した。Content-Type が必須の連携先には、このまま適合すると保証しない。
 
@@ -593,3 +593,38 @@ RG は承認された配置先を使う。システム MI は Logic App に付�
 以上に合格してから顧客配布物を Consumption 版へ一括更新する。失敗・未実施が残る段階で、現行テンプレートの種別や接続だけを部分的に置換しない。
 
 今回の確認は公開仕様の調査と設計資料の更新のみ。既存配布物の資料関連テスト 4 件と、更新した資料の `git diff --check` は成功したが、これを Consumption の実行・接続・CSV 保存の検証結果とは扱わない。
+
+## 22. Consumption への資材・顧客資料の切替（2026-10-22）
+
+ユーザーから顧客向け資料を含む全資材の Consumption 化、ラバーダックレビュー、問題解消後の PR 作成を依頼された。§21 の案を現行実装へ進め、過去の ASE / WS1 は履歴として残すが現行の提供経路から外す。
+
+### 今回の範囲
+
+- 3 段階 ARM を保存専用 Storage と評価用 LAW → 初期無効の Consumption と管理接続 2 個 → アプリ MI の限定 RBAC に変更する。
+- Blob を管理コネクタにし、システム MI で接続。ワークフローパラメーターへ設定を移し、host / appsetting / Standard の接続ファイルを除く。REST 直書き・共有キー・SAS は使わない。
+- 実行用 VNet / PE / Private DNS、App Service / WS1、ホスト UAMI、Queue / Table、Files、AMPLS、旧検証専用資材を除く。既存 Azure 資源をこの削減のために削除する操作は行わない。
+- 顧客の入口・導入・運用・ダミーテスト・受入表・構成図、提供者の入口・コンテキスト・保守資料・作業指示を Consumption に統一する。
+- 月次の初回日時は `2026-12-05T09:00:00`（実施時に少なくとも 1 か月先の承認日時へ変更）、Tokyo Standard Time。Month は startTime を基準とし、Day / Week 用の高度な schedule を流用しない。[Recurrence の公式仕様](https://learn.microsoft.com/en-us/azure/connectors/connectors-native-recurrence)を参照。
+
+### 検証の境界
+
+今回の切替では Azure 資源の作成・変更・削除を行わない。専用 RG の新規作成を含む実機検証は、構成・費用・権限の承認後に別途行う。現在の Azure 認証が有効であることは読み取り確認したが、これを資源作成の承認と扱わない。
+
+初回から Public Disabled + AzureServices の接続、portal のみの構築・編集保存・接続認可、ダミー 4 / 0 / 1 件の実 Blob 保存と独立読み戻し、Blob の保存 MIME / 上書き / 再試行、CSV ファイル取得、本番量は未実施。顧客の受入表には未実施と記載し、旧 WS1 の成功を引き継がない。
+
+操作者の CSV 取得は別条件として明記する。Public Disabled の Storage へ通常のブラウザーが接続できると説明せず、承認済みの既存取得経路がなければファイル取得の受入を停止する。本体の読み戻しと CSV ファイルの取得成功は別に判定する。
+
+### 静的・オフライン検証
+
+- 3 段階 Bicep のビルドと配布物の `--check` 一致を確認。
+- `node --test scripts/customer.test.mjs` **13 / 13 成功**。最小資源、PNA / キー設定、Consumption V1 MI 接続、限定 RBAC、月次日時、パラメーター、必須応答検証、保存・読み戻し後の公開順序、識別子、ローカルリンクを検査した。
+- 正本の WDL を入力とするオフラインハーネスで、ダミー 4 / 0 / 1 件、月境界、既定前月計算、BOM・CSV エスケープ、再実行、異常注入時の current 保持を検査した。current 書き込み後の応答喪失では Failed でも書き込み済みの可能性があることを区別する。
+- 提供者・顧客資料のローカルファイルリンク **71 件**が解決し、`git diff --check` も成功。CRLF 自動変換の警告は差分エラーとは別。
+
+ハーネスは Logic Apps 実行サービスや管理コネクタを再現しきるものではない。クラウド側の式評価・応答形状・同名 Blob の置換・例外接続を証明せず、Azure 実機受入は未実施のままとする。
+
+### ラバーダックレビュー
+
+ユーザー指定の rubber-duck エージェントで、全変更と顧客手順を読み取りレビューした。**ブロッキング指摘はなし**。V1 の multi-auth MI 接続、`$connections`、既存ワークフローからの principal 参照、初期無効、動的スキーマ、Select、BOM と保存バイト比較、月次開始日時の整合を確認した。
+
+非ブロッキングの注意は、オフライン CSV 列順の実サービス再現性と、入力例に含むプレースホルダーの扱いの 2 点。列順の違いは Check_Header で失敗し得ることを受入・障害対応へ補足し、`<...>` を未置換で投入しない注意は維持した。実機受入・取得経路の未確認は引き続き明記する。

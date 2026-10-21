@@ -2,8 +2,14 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "location": { "value": "southeastasia" },
-    "prefix": { "value": "<LOWERCASE_PREFIX_3_TO_8_CHARS>" },
-    "retentionInDays": { "value": 90 }
+    "location": {
+      "value": "southeastasia"
+    },
+    "prefix": {
+      "value": "lawexp"
+    },
+    "retentionInDays": {
+      "value": 90
+    }
   }
 }

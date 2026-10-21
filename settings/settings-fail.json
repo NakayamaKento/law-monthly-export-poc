@@ -1,4 +1,0 @@
-[
-  { "name": "MONTH_OVERRIDE", "value": "2026-01", "slotSetting": false },
-  { "name": "KQL_BODY", "value": "this_is_not_valid_kql | where ((", "slotSetting": false }
-]

@@ -1,54 +1,59 @@
-# 顧客提供資材の保守（提供者向け）
+# Consumption 顧客提供資材の保守（提供者向け）
 
-顧客向け入口は [customer/README.md](../customer/README.md)。同フォルダー単体が配布対象です。本書と [scripts/](../scripts/) は顧客の作業手順に含めません。
+配布対象は [customer/](../customer/) 単独です。本書と [scripts/](../scripts/) は顧客のコマンド実行手順ではありません。顧客は Azure portal のみを使います。
 
 ## 正本と生成物
 
-| 正本 | 生成先 |
+| 正本 | 生成物 |
 |---|---|
-| [infra/customer/](../infra/customer/) の 3 段階 Bicep と参照元の [foundation.bicep](../infra/foundation.bicep)、[app-ws.bicep](../infra/app-ws.bicep) | [customer/infra/](../customer/infra/) の ARM JSON |
-| [workflow.json](../logicapp/monthly-export/workflow.json) | [workflow.json](../customer/logicapp/monthly-export/workflow.json)、定義本体だけの [definition.json](../customer/logicapp/monthly-export/definition.json) |
-| [host.json](../logicapp/host.json)、[connections.json](../logicapp/connections.json) | [customer/logicapp/](../customer/logicapp/) の同名ファイル |
-| [settings.json](../settings/settings.json)、[settings-b.json](../settings/settings-b.json) | [sample.json](../customer/settings/sample.json)、[azureactivity.json](../customer/settings/azureactivity.json) |
-| [settings.json](../settings/settings.json) | 提供者向け [settings-ws.json](../settings/settings-ws.json) も同時生成し、旧 LAW_ID 設定との食い違いを防ぐ |
+| [3 段階 Bicep](../infra/customer/) | [customer/infra/](../customer/infra/) の 01-foundation / 02-workflow / 03-access ARM |
+| [Consumption 定義](../logicapp/monthly-export/definition.json) | [配布定義](../customer/logicapp/monthly-export/definition.json)。第 2 段階 ARM にも同梱 |
+| [settings/](../settings/) の設定 JSON | [customer/settings/](../customer/settings/) の sample / azureactivity |
 
-ARM のパラメーター例と顧客向け Markdown は直接保守します。生成済み JSON を手修正せず、正本を更新して再生成してください。正本の Bicep はリポジトリ外の依存なしでビルドでき、生成された ARM の入れ子テンプレートはすべて同梱です。
+ARM の入力例と Markdown は直接保守します。生成済み定義・ARM を手修正せず、正本を直して再生成してください。外部テンプレートリンクや実環境 ID、ユーザーパス、資格情報を同梱しません。
 
-提供者の開発環境には Node.js と Bicep CLI が必要です。今回の生成・検証では Node.js 24.16.0 / Bicep 0.41.2 を使用しました。外部 npm パッケージは不要です。**顧客に以下を実行させません。**
+## 再生成と検証
+
+Node.js と Bicep CLI を提供者の開発環境で使います。npm 依存追加は不要です。
 
 ```powershell
 node .\scripts\build-customer.mjs
 node .\scripts\build-customer.mjs --check
 node --test .\scripts\customer.test.mjs
+git --no-pager diff --check
 ```
 
-`--check` は変更を書き込まず、現在の Bicep と元 JSON から得た結果が配布資材と一致するかを検証します。Bicep バージョンが異なる場合、生成メタデータが変わることがあります。同じ版で比較するか、正本と生成物を同時に更新します。ビルド失敗を握り潰さず終了します。
+`--check` は書き込まず、Bicep の現在のコンパイル結果と配布物を照合します。同じ Bicep バージョンで比較し、バージョン差でメタデータが変わる場合は正本と生成物を一緒に確認します。実デプロイやコネクタの実行は静的テストでは証明できません。
 
-元資材には Storage 名長さの型推論警告（BCP334）と未使用 contentShareMode の警告があります。[MI 管理コネクタの公式 ARM 例](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)で必要な `kind: V2` / `parameterValueSet` / `connectionRuntimeUrl` と accessPolicies は Bicep の型定義不足による BCP187 / BCP089 / BCP053 / BCP081 警告が出ます。診断コードの意味は [Bicep の警告・エラー一覧](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/bicep-core-diagnostics)を参照してください。型警告を避けるための any キャストは追加していません。新しいエラーは許容しません。警告の存在は実デプロイ可否の検証を代替しませんが、2026-10-21 に全 3 段階の Azure validate / what-if / 実投入が成功しています。
+## 移行で守る契約
 
-共有基盤の既定 `hostingMode=ase` / `privateLogAnalytics=true` / `separateOutputStorage=true` は旧 PoC のリソース構成を保持します。顧客版だけ `ws` / `false` / `false` を固定指定し、Storage 1 個、Blob / Queue / Table PE 3 個、サイト PE 1 個、DNS 4 ゾーン、サブネット 2 個にします。LAW の公開クエリは有効、公開取り込みは無効です。条件を満たさない出力 Storage / PE と AMPLS 一式は作成しません。旧環境へ基盤を再投入して削除する目的には使いません。
+- Consumption は `Microsoft.Logic/workflows`、システム MI、初期 Disabled。管理接続 2 個は V1。Standard の V2 / host.json / connections.json / `appsetting()` / ServiceProvider を再導入しない。
+- 3 段階は新規基盤 → 無効状態のワークフロー・接続 → RBAC。設定・権限が揃うまで有効化しない。
+- Storage は初回から PNA Disabled、Deny、AzureServices、Shared Key false、匿名 false、TLS 1.2 / HTTPS。接続失敗時に公開化・キー認証で穴埋めしない。
+- exports の Blob Data Contributor と LAW の Log Analytics Reader のみ。ホストロールやユーザー割り当て MI は不要。
+- ワークフローのパラメーターに KQL・列・対象月・対象 LAW・Storage 名を置く。ARM が `$connections` を設定し、ユーザーのサインイン・シークレットを不要にする。
+- 月境界、4 / 0 / 1 件、列順、BOM、必須 value / bag、異常応答・行数上限、有限再試行、同時実行数 1 を保持する。
+- CSV / manifest は run 別、最後に current。読み戻しの応答型・エンコードと、同名 current 更新時の管理コネクタの挙動を検証する。通信失敗時に current 不変を無条件に断言しない。
+- 旧 WS1 のハッシュ・MIME・接続実績を Consumption の実測として転用しない。
 
-ワークフロー正本と connections.json は Blob 組み込み / Monitor Logs 管理コネクタへ変更済みです。第 3 段階で V2 API 接続 1 個とアプリ MI のアクセスポリシーを作成し、Blob ロールは exports スコープに限定します。全 8 アプリ設定を接続 JSON も含めて照合し、HTTP アクションがないこと、value / bag の必須検証、トリガー同時実行数 1、既存の出力パス・BOM・ダミー境界を静的検証します。
+## 検証・受入の境界
 
-実機で `POST /getTimeRangeTypes` を呼び、「Set in query」の `timerangetype` は `"3"` と確認しました。Blob の正式な接続パラメーターは `blobStorageEndpoint` / `managedIdentityType: SystemAssigned`、Monitor Logs MI の接続プロパティには `additionalAudiences: ["https://api.loganalytics.io"]` が必要でした。追加 audience がないとメタデータ取得だけは成功しても Query は Token not found で失敗します。実ホストの Blob 操作メタデータと [Microsoft の接続生成実装](https://github.com/Azure/LogicAppsUX/blob/main/libs/designer/src/lib/core/actions/bjsworkflow/connections.ts)を照合して正本・配布物・テストを更新しています。公開実装は公式のサポート保証とは区別してください。
+[顧客の受入確認](../customer/docs/validation.md)には Consumption の Azure 実機項目を未実施として記載します。静的テスト成功を「portal 完結」「保存済み CSV 確認済み」と表現しません。
 
-同じ版でダミーの 4 件・0 件・1 件の保存を実行し、組み込み readBlob で current / manifest / CSV を独立読み戻しして内容・BOM・MD5 を確認しました。CSV / JSON の保存 MIME は `text/plain; charset=utf-8` で、旧 HTTP 版とは異なります。実機の詳細は [plan.md](plan.md) §19、顧客向けの検証値は[受入確認](../customer/docs/validation.md)を参照してください。portal の接続 JSON 編集・保存は未実証です。旧 ASE 閉域 LAW の操作記録に現行ワークフローをそのまま適用しないでください。
+初回 Disabled＋例外の動作、MI 接続の作成と認可、4 / 0 / 1 件の保存・独立読み戻し、異常系、再実行、公開クライアント拒否、portal 編集・実ファイル取得は別途実機確認が必要です。通常のブラウザーは信頼されたサービスの例外を使えないため、CSV 取得に承認済みの別経路が必要です。
 
-## 更新時の確認
+実機検証は構成・費用・権限の承認後に専用 RG で実施し、RG 外も含め今回作成分のみ削除・残存確認します。既存 WS1 プランを再利用・変更・削除しません。
 
-- customer 内のリンクがすべて自己完結すること、実環境 ID / PoC 固有 Storage / ユーザーパス / 資格情報が混ざらないこと。
-- サポート未確認、portal 操作未検証、性能・応答検証・排他の不足を隠さないこと。
-- ARM の入力と手順の出力転記、設定キー、Blob パス、期待件数が一致すること。
-- portal の貼り付け形式と host / connections の配置前提を実機で確認すること。生成時の構文検証だけで portal 完結と表現しないこと。
-- 実機検証は専用 RG、サポート確認、構成・費用の個別承認を得てから実施し、RG 外の診断設定等も後片付けすること。
-- 検証結果は [docs/plan.md](plan.md) へ日付・構成・結果・差異を追記する。顧客の固有値をコミットしないこと。
+## 過去の削除事故を再発させない
 
-## 既存プランを再利用する検証の削除事故防止
+旧 WS1 検証では最後のサイト削除に空プランが連動し、保持に失敗して元の宣言で再作成復旧しました。詳しくは [plan.md](plan.md) §19。Consumption 版は App Service プランを作りませんが、別途旧環境を整理するときは [Web Apps Delete](https://learn.microsoft.com/en-us/rest/api/appservice/web-apps/delete?view=rest-appservice-2024-04-01)の `deleteEmptyServerFarm=false`、事前 GET 保全、削除後の直接比較を維持します。汎用リソース削除を旧サイトへ使いません。
 
-2026-10-21 の検証では、サイトの汎用 `az resource delete` により、最後のアプリとともに保持予定の空 WS1 プランも削除された。対象 ID の除外リストだけではプロバイダーの連動削除を防げなかった。元のデプロイと完全一致するプラン宣言だけを検証・再投入し、同一 ID・リージョン・WS1・kind・最大ワーカー数・アプリ 0 件・Ready を確認して復旧したが、元のリソースを無変更で保持できたという結果ではない。
+## 公開情報
 
-[Web Apps Delete の公式仕様](https://learn.microsoft.com/en-us/rest/api/appservice/web-apps/delete?view=rest-appservice-2024-04-01)は、空プランを保持するには **`deleteEmptyServerFarm=false`** を指定し、既定では削除されると記載している。提供者が管理 API でサイトを削除する場合は、この値を必ず明示し、汎用リソース削除を使わない。顧客の portal 手順では関連プランを含めないこと・保持を明示できなければ停止することを記載する。
-
-作成前にプランの GET 本文・設定・タグと既存資源一覧を私有の検証記録へ保全し、終了後は一覧だけでなくプラン本体の GET も比較する。既存 RG を丸ごと削除しない。予期しない差異は成功扱いにせず、操作履歴を保全してユーザーへ報告する。この注意点はリポジトリの作業指示と顧客の削除手順にも反映した。
-
-既存の PoC 検証スクリプトは配布・再生成に使いません。そこに残る固定名や CLI の成功実績を顧客手順へ移植しないでください。
+- [MI 認証・Consumption V1 の接続 ARM](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)
+- [Blob 管理コネクタの操作・制限](https://learn.microsoft.com/en-us/connectors/azureblobconnector/)
+- [Blob のファイアウォール越し接続](https://learn.microsoft.com/en-us/azure/connectors/connectors-create-api-azureblobstorage#access-blob-storage-in-same-region-with-system-managed-identities)
+- [Storage の例外の優先関係](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-limitations)
+- [Monitor Logs の操作・MI](https://learn.microsoft.com/en-us/connectors/azuremonitorlogs/)
+- [ワークフロー定義のパラメーター](https://learn.microsoft.com/en-us/azure/logic-apps/workflow-definition-language-schema)
+- [Bicep のビルド](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/bicep-cli#build)
