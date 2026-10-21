@@ -1,1 +1,29 @@
-{}
+{
+  "serviceProviderConnections": {
+    "AzureBlob": {
+      "displayName": "Private exports",
+      "parameterSetName": "ManagedServiceIdentity",
+      "parameterValues": {
+        "blobStorageEndpoint": "@appsetting('OUT_BLOB_URI')",
+        "managedIdentityType": "SystemAssigned",
+        "authProvider": { "Type": "ManagedServiceIdentity" }
+      },
+      "serviceProvider": { "id": "/serviceProviders/AzureBlob" }
+    }
+  },
+  "managedApiConnections": {
+    "azuremonitorlogs": {
+      "api": { "id": "@appsetting('MONITOR_API_ID')" },
+      "connection": { "id": "@appsetting('MONITOR_CONNECTION_ID')" },
+      "connectionRuntimeUrl": "@appsetting('MONITOR_CONNECTION_RUNTIME_URL')",
+      "authentication": { "type": "ManagedServiceIdentity" },
+      "connectionProperties": {
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.core.windows.net/",
+          "additionalAudiences": ["https://api.loganalytics.io"]
+        }
+      }
+    }
+  }
+}

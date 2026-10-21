@@ -16,6 +16,9 @@ module foundation '../foundation.bicep' = {
     location: location
     prefix: prefix
     retentionInDays: retentionInDays
+    hostingMode: 'ws'
+    privateLogAnalytics: false
+    separateOutputStorage: false
   }
 }
 
@@ -24,5 +27,6 @@ output hostSaName string = foundation.outputs.hostSaName
 output outSaName string = foundation.outputs.outSaName
 output uamiName string = '${prefix}-host-mi'
 output lawName string = '${prefix}-law'
+output lawResourceId string = foundation.outputs.lawId
 output lawCustomerId string = foundation.outputs.lawCustomerId
 output outBlobUri string = 'https://${foundation.outputs.outSaName}.blob.${environment().suffixes.storage}'

@@ -35,6 +35,7 @@ for (const [source, destination] of [
   ['logicapp/connections.json', 'customer/logicapp/connections.json'],
   ['logicapp/monthly-export/workflow.json', 'customer/logicapp/monthly-export/workflow.json'],
   ['settings/settings.json', 'customer/settings/sample.json'],
+  ['settings/settings.json', 'settings/settings-ws.json'],
   ['settings/settings-b.json', 'customer/settings/azureactivity.json'],
 ]) {
   emitJson(destination, JSON.parse(readFileSync(resolve(root, source), 'utf8')));

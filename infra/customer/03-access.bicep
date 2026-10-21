@@ -18,13 +18,17 @@ resource outSa 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
   name: outSaName
 }
 
+resource exports 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
+  name: '${outSa.name}/default/exports'
+}
+
 resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: lawName
 }
 
 resource blobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(outSa.id, app.id, 'blob-contributor')
-  scope: outSa
+  name: guid(exports.id, app.id, 'blob-contributor')
+  scope: exports
   properties: {
     principalId: app.identity.principalId
     principalType: 'ServicePrincipal'
@@ -39,6 +43,37 @@ resource lawRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     principalId: app.identity.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '73c42c96-874c-492b-b04d-ab87d138a893')
+  }
+}
+
+resource monitorConnection 'Microsoft.Web/connections@2016-06-01' = {
+  name: '${appName}-logs'
+  location: location
+  kind: 'V2'
+  properties: {
+    displayName: 'Log Analytics managed identity'
+    api: {
+      id: subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'azuremonitorlogs')
+    }
+    parameterValueSet: {
+      name: 'managedIdentityAuth'
+      values: {}
+    }
+  }
+}
+
+resource monitorAccess 'Microsoft.Web/connections/accessPolicies@2016-06-01' = {
+  parent: monitorConnection
+  name: appName
+  location: location
+  properties: {
+    principal: {
+      type: 'ActiveDirectory'
+      identity: {
+        objectId: app.identity.principalId
+        tenantId: subscription().tenantId
+      }
+    }
   }
 }
 
@@ -86,3 +121,6 @@ resource appPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-
 
 output appHost string = app.properties.defaultHostName
 output privateEndpointName string = appPe.name
+output monitorApiId string = monitorConnection.properties.api.id
+output monitorConnectionId string = monitorConnection.id
+output monitorConnectionRuntimeUrl string = monitorConnection.properties.connectionRuntimeUrl

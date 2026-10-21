@@ -5,42 +5,55 @@ param prefix string = 'lawexp'
 param uniq string = uniqueString(resourceGroup().id)
 param retentionInDays int = 30
 
+@allowed(['ase', 'ws'])
+param hostingMode string = 'ase'
+param privateLogAnalytics bool = true
+param separateOutputStorage bool = true
+
 var vnetName = '${prefix}-vnet'
 var hostSaName = toLower('${prefix}h${uniq}')
-var outSaName = toLower('${prefix}o${uniq}')
+var outSaName = separateOutputStorage ? toLower('${prefix}o${uniq}') : hostSaName
+
+var peSubnet = { name: 'snet-pe', properties: { addressPrefix: '10.50.1.0/24' } }
+var aseSubnets = [
+  {
+    name: 'snet-ase'
+    properties: {
+      addressPrefix: '10.50.0.0/24'
+      delegations: [
+        { name: 'ase', properties: { serviceName: 'Microsoft.Web/hostingEnvironments' } }
+      ]
+    }
+  }
+  { name: 'snet-vm', properties: { addressPrefix: '10.50.2.0/24' } }
+  { name: 'AzureBastionSubnet', properties: { addressPrefix: '10.50.3.0/26' } }
+]
 
 resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   name: vnetName
   location: location
   properties: {
     addressSpace: { addressPrefixes: ['10.50.0.0/16'] }
-    subnets: [
-      {
-        name: 'snet-ase'
-        properties: {
-          addressPrefix: '10.50.0.0/24'
-          delegations: [
-            { name: 'ase', properties: { serviceName: 'Microsoft.Web/hostingEnvironments' } }
-          ]
-        }
-      }
-      { name: 'snet-pe', properties: { addressPrefix: '10.50.1.0/24' } }
-      { name: 'snet-vm', properties: { addressPrefix: '10.50.2.0/24' } }
-      { name: 'AzureBastionSubnet', properties: { addressPrefix: '10.50.3.0/26' } }
-    ]
+    subnets: hostingMode == 'ase' ? concat([peSubnet], aseSubnets) : [peSubnet]
   }
 }
 
-var zoneNames = [
+var commonZoneNames = [
   'privatelink.blob.${environment().suffixes.storage}'
   'privatelink.queue.${environment().suffixes.storage}'
   'privatelink.table.${environment().suffixes.storage}'
-  'privatelink.file.${environment().suffixes.storage}'
+]
+var monitorZoneNames = [
   'privatelink.monitor.azure.com'
   'privatelink.oms.opinsights.azure.com'
   'privatelink.ods.opinsights.azure.com'
   'privatelink.agentsvc.azure-automation.net'
 ]
+var zoneNames = concat(
+  commonZoneNames,
+  privateLogAnalytics ? monitorZoneNames : [],
+  hostingMode == 'ase' ? ['privatelink.file.${environment().suffixes.storage}'] : []
+)
 
 resource zones 'Microsoft.Network/privateDnsZones@2020-06-01' = [for z in zoneNames: {
   name: z
@@ -78,7 +91,7 @@ resource hostSa 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
 }
 
-resource outSa 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+resource outSa 'Microsoft.Storage/storageAccounts@2023-05-01' = if (separateOutputStorage) {
   name: outSaName
   location: location
   sku: { name: 'Standard_LRS' }
@@ -94,9 +107,14 @@ resource outSa 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
 }
 
+resource outputAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
+  name: outSaName
+}
+
 resource hostBlobSvc 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
-  parent: outSa
+  parent: outputAccount
   name: 'default'
+  dependsOn: [hostSa, outSa]
 }
 
 resource outContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
@@ -105,8 +123,7 @@ resource outContainer 'Microsoft.Storage/storageAccounts/blobServices/containers
   properties: { publicAccess: 'None' }
 }
 
-var hostGroups = ['blob', 'queue', 'table', 'file']
-var hostZoneIdx = { blob: 0, queue: 1, table: 2, file: 3 }
+var hostGroups = hostingMode == 'ase' ? ['blob', 'queue', 'table', 'file'] : ['blob', 'queue', 'table']
 
 resource hostPes 'Microsoft.Network/privateEndpoints@2023-11-01' = [for g in hostGroups: {
   name: '${hostSaName}-${g}-pe'
@@ -127,12 +144,12 @@ resource hostPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023
   name: 'default'
   properties: {
     privateDnsZoneConfigs: [
-      { name: 'z', properties: { privateDnsZoneId: zones[hostZoneIdx[g]].id } }
+      { name: 'z', properties: { privateDnsZoneId: zones[indexOf(zoneNames, 'privatelink.${g}.${environment().suffixes.storage}')].id } }
     ]
   }
 }]
 
-resource outPe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+resource outPe 'Microsoft.Network/privateEndpoints@2023-11-01' = if (separateOutputStorage) {
   name: '${outSaName}-blob-pe'
   location: location
   properties: {
@@ -143,7 +160,7 @@ resource outPe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
   }
 }
 
-resource outPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+resource outPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = if (separateOutputStorage) {
   parent: outPe
   name: 'default'
   properties: {
@@ -177,11 +194,11 @@ resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
     sku: { name: 'PerGB2018' }
     retentionInDays: retentionInDays
     publicNetworkAccessForIngestion: 'Disabled'
-    publicNetworkAccessForQuery: 'Disabled'
+    publicNetworkAccessForQuery: privateLogAnalytics ? 'Disabled' : 'Enabled'
   }
 }
 
-resource ampls 'microsoft.insights/privateLinkScopes@2021-07-01-preview' = {
+resource ampls 'microsoft.insights/privateLinkScopes@2021-07-01-preview' = if (privateLogAnalytics) {
   name: '${prefix}-ampls'
   location: 'global'
   properties: {
@@ -192,13 +209,13 @@ resource ampls 'microsoft.insights/privateLinkScopes@2021-07-01-preview' = {
   }
 }
 
-resource amplsScope 'microsoft.insights/privateLinkScopes/scopedResources@2021-07-01-preview' = {
+resource amplsScope 'microsoft.insights/privateLinkScopes/scopedResources@2021-07-01-preview' = if (privateLogAnalytics) {
   parent: ampls
   name: 'law'
   properties: { linkedResourceId: law.id }
 }
 
-resource amplsPe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+resource amplsPe 'Microsoft.Network/privateEndpoints@2023-11-01' = if (privateLogAnalytics) {
   name: '${prefix}-ampls-pe'
   location: location
   dependsOn: [amplsScope]
@@ -210,15 +227,15 @@ resource amplsPe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
   }
 }
 
-resource amplsPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+resource amplsPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = if (privateLogAnalytics) {
   parent: amplsPe
   name: 'default'
   properties: {
     privateDnsZoneConfigs: [
-      { name: 'monitor', properties: { privateDnsZoneId: zones[4].id } }
-      { name: 'oms', properties: { privateDnsZoneId: zones[5].id } }
-      { name: 'ods', properties: { privateDnsZoneId: zones[6].id } }
-      { name: 'agentsvc', properties: { privateDnsZoneId: zones[7].id } }
+      { name: 'monitor', properties: { privateDnsZoneId: zones[indexOf(zoneNames, 'privatelink.monitor.azure.com')].id } }
+      { name: 'oms', properties: { privateDnsZoneId: zones[indexOf(zoneNames, 'privatelink.oms.opinsights.azure.com')].id } }
+      { name: 'ods', properties: { privateDnsZoneId: zones[indexOf(zoneNames, 'privatelink.ods.opinsights.azure.com')].id } }
+      { name: 'agentsvc', properties: { privateDnsZoneId: zones[indexOf(zoneNames, 'privatelink.agentsvc.azure-automation.net')].id } }
       { name: 'blob', properties: { privateDnsZoneId: zones[0].id } }
     ]
   }
@@ -226,7 +243,7 @@ resource amplsPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@202
 
 output vnetId string = vnet.id
 output hostSaName string = hostSa.name
-output outSaName string = outSa.name
+output outSaName string = outSaName
 output uamiId string = uami.id
 output lawId string = law.id
 output lawCustomerId string = law.properties.customerId

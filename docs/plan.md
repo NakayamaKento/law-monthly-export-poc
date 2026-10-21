@@ -8,7 +8,9 @@ Log Analytics の前月分ログをAzureサービスで毎月抽出し、CSVと�
 
 現在の顧客提供方針は **WS1 を主サンプルとし、公式サポート範囲の確認を導入前の必須条件とする**。当初の ASE 推奨や WS 不採用の記述は当時の判断として残す。顧客向け入口は [customer/README.md](../customer/README.md)。
 
-インターネット復旧後にMicrosoft Learnの公式資料を再取得して見直した。通常のWorkflow StandardプランではホストStorageのキーアクセスを無効化できないことが確認され、追加要件「ホストを含めキー認証不可」と不適合になったため、前回案をそのまま採用しない。
+2026-10-21 の追加指示で **Log Analytics は閉域対象外**へ変更した。現行の顧客用資材は LAW の MI 認証付き公開クエリを使い、Storage / サイトの閉域を維持する。File PE / DNS と AMPLS / Monitor DNS を除外し、PE 5 個・DNS 4 ゾーン・サブネット 2 個とする（§18）。過去の LAW 閉域前提の実績・判断は履歴として区別する。
+
+インターネット復旧後に[Microsoft Learn のホスト Storage 認証の公式資料](https://learn.microsoft.com/en-us/azure/logic-apps/create-single-tenant-workflows-azure-portal#set-up-managed-identity-access-to-your-storage-account)を再取得して見直した。通常のWorkflow StandardプランではホストStorageのキーアクセスを無効化できないことが確認され、追加要件「ホストを含めキー認証不可」と不適合になったため、前回案をそのまま採用しない。
 
 改訂後の主候補は **Logic Apps Standard＋内部向けApp Service Environment v3（Windows／Isolated v2プラン）**。公式資料はASE v3でのマネージドID設定後のStorageキーアクセス無効化を明記している。ただし「後から無効化できる」と「初回から一度もキー認証を使わず構築できる」は同義ではない。後者のARMテンプレート設計と実機検証を必須ゲートにする。現時点で完成済み・実証済みとは扱わない。
 
@@ -32,7 +34,7 @@ ASE v3のSoutheast Asia提供は公式のリージョン表で確認できた。
 - ホストStorageを含めキー認証を禁止する。出力用とホスト用の双方でShared Keyアクセスを無効化し、SAS・接続文字列へのフォールバックを行わない。
 - 非公開Storageを初期構築するため、準備したARMテンプレートJSONをAzure portalのカスタムデプロイ画面から投入することを許容する。ローカルCLI、Cloud Shell、PowerShell実行は使用しない。
 - サンプルAzureActivityの取り込みは、診断設定のMicrosoft非公開サービス間チャネルを許容する。Private Endpoint経由ではない例外として記録する。月次の問い合わせとCSV保存はPrivate Endpoint経由のまま。
-- 管理用VMの外向き通信にNAT Gatewayを候補として使用する。これは送信経路でありVMへの着信公開ではない。NATは宛先制限機能を持たない。
+- 管理用VMの外向き通信にNAT Gatewayを候補として使用する。これは送信経路でありVMへの着信公開ではない。NATは宛先制限機能を持たない。[NAT Gateway の概要](https://learn.microsoft.com/en-us/azure/nat-gateway/nat-overview)を参照。
 - 本番対象テーブルのAnalytics保持は90日を候補にし、設定・課金は別途承認する。CSV側の保持期間は別途決定する。
 - Logic Apps優先を維持し、ASE v3案を主候補にすること、キー認証なしの初期構築検証と費用承認を必須とすることをユーザーと確認した。
 
@@ -343,3 +345,251 @@ Workspaceの公開取り込み禁止は維持する。サンプル取り込み�
 - 初期導入で使用する固定サンプルと月を限定し、ワークフロー無効化・将来の初回開始日時・通常運用時の設定復元を手順化した。保存直後の発火対策の効果も実機受入対象とする。
 - 元の基盤 VNet 定義に後追加の snet-integ がないため、WS1 作成後の基盤テンプレート再投入を禁止する注意を追加。既存本番環境への更新手順ではなく、新規専用評価環境への導入手順として提供する。
 - 資料整備・静的検証後、ユーザーの指示により **サポート確認待ちとして本作業の portal 実機受入を保留**した。実機受入完了とは扱わず、回答条件の照合と個別の作成承認を経て再開する。
+
+## 15. 実データなしのテスト実行手順の追加（2026-10-20）
+
+- ユーザー要望により、[受入確認](../customer/docs/validation.md) §2.1 に、既存 datatable のダミーデータによる portal テストを追加。設定 5 項目、直接貼り付けられる KQL、手動実行、履歴の期待値、current / manifest / CSV の照合、0 件・翌月境界、設定復元・無効化までを順に記載した。
+- 構成・ランタイム・生成資材は変更せず、取り込み済みデータ・診断設定・テーブル作成が不要であることを明示。実 LAW API と非公開 Blob を使うため、基盤・権限・閉域経路・事前承認は引き続き必要。
+- 顧客向け README・導入・運用資料からテスト手順へ誘導。実データがない評価では MONTH_OVERRIDE を空文字にして定期運転を開始せず、ダミー設定に戻して無効化した状態で終了する。
+- Microsoft Learn の [datatable 仕様](https://learn.microsoft.com/en-us/kusto/query/datatable-operator?view=azure-monitor)で、スキーマと値をクエリ内に定義することを確認した。
+- 静的検証：`node --test .\scripts\customer.test.mjs` は **9 / 9 成功**。掲載 KQL と実際の sample 設定の一致確認を追加し、既存の期待件数・設定・ワークフロー出力・リンク等の検証も成功。`git diff --check` 成功。
+- Azure リソース作成・実行は行っておらず、サポート確認待ちの portal 実機受入保留は継続。今回の結果は手順と資材の静的確認であり、portal 実機成功の追加実績ではない。
+
+## 16. 顧客向け Start time の具体例（2026-10-20）
+
+- [顧客向け導入手順](../customer/docs/setup.md) §7 に、直接コピーできる `2026-12-05T09:00:00` と recurrence オブジェクトの JSON を追加。日本時間の Time zone、末尾 Z / UTC オフセットを付けないこと、貼り付け対象を明記した。
+- Microsoft Learn の [Recurrence の仕様](https://learn.microsoft.com/en-us/azure/connectors/connectors-native-recurrence)で、タイムゾーン選択時の日時形式、Z 指定時の UTC 解釈、月次の少なくとも 1 か月前の設定を再確認。サンプルの期限切れと承認済み日時への変更、手動テストの MONTH_OVERRIDE との違いも記載した。
+- ワークフロー本体と生成資材は変更しない。実機受入の保留は継続する。
+
+## 17. 顧客用 WS1 の必要接続の見直し（2026-10-21）
+
+以下は LAW 閉域を前提にした最初の見直し時点の記録。直後の追加指示で AMPLS も除外した現行構成は §18 を参照する。
+
+### 判断と変更
+
+- 目的は、業務ワークフローで使う接続と Logic Apps Stateful ランタイムの依存を区別し、不要な接続だけを配布資材から除外すること。稼働中環境を削除する作業ではない。
+- ホスト Storage の **Blob / Queue / Table PE と DNS を維持**。HTTP アクションしかない場合でも Stateful の基盤は Blob / Queue / Table を使うため、Queue / Table を業務アクション未使用という理由で除外しない。対応するホスト MI の権限と接続設定も保持する。
+- Azure Files のコンテンツ共有を設定しない顧客用 WS1 では **File PE・File DNS ゾーン・その VNet リンクを除外**。一般的な Standard の File 接続不要を示すものではなく、コンテンツ共有なし構成のサポート確認は引き続き必要。
+- 顧客用では ASE・管理 VM・Bastion 用の未使用予約サブネットも除外。PE 用と第 2 段階の VNet 統合用のみを作成する。管理経路が別途必要な場合は別設計・承認とする。
+- AMPLS は公式の 5 DNS ゾーンを維持。問い合わせごとに全ゾーンを使うという主張ではなく、公式の PE / DNS 関連付けを維持する判断。Blob DNS はホスト・出力・AMPLS で共用する。
+- 共有の [foundation.bicep](../infra/foundation.bicep) に `hostingMode` を追加。既定 `ase` は元 PoC のリソース集合を維持、[顧客用ラッパー](../infra/customer/01-foundation.bicep) のみ `ws` を指定して縮小する。
+
+### 最小構成の内訳
+
+| 対象 | PE | 備考 |
+|---|---|---|
+| ホスト Blob / Queue / Table | 3 | Stateful 実行基盤 |
+| 出力 Blob | 1 | CSV / manifest / current |
+| AMPLS | 1 | LAW の閉域問い合わせ |
+| アプリサイト | 1 | 非公開サイト / SCM 管理 |
+| 合計 | **6** | 基盤段階は 5、第 3 段階でサイト用を追加 |
+
+DNS は Storage 3 ゾーン、Monitor 系 4 ゾーン、サイト 1 ゾーンの **計 8**。AMPLS には Monitor 系 4 と共用 Blob の 5 ゾーンを関連付ける。各ゾーンの VNet リンクは 1 個。サブネットは PE / VNet 統合の 2 個。
+
+### 参照した公式仕様
+
+- [Standard の Storage 利用](https://learn.microsoft.com/en-us/azure/logic-apps/estimate-storage-costs)：ワークフローに伴う Blob / Queue / Table の操作を確認。
+- [Stateful / Stateless の違い](https://learn.microsoft.com/en-us/azure/logic-apps/single-tenant-overview-compare#stateful-and-stateless-workflows)：Stateful の外部ストレージによる入出力・状態保存と復旧を確認。Stateless への切り替えによる依存削除は要件変更となるため実施しない。
+- [非公開 Storage デプロイ](https://learn.microsoft.com/en-us/azure/logic-apps/deploy-single-tenant-logic-apps-private-storage-account)：一般的な File を含む構成と今回の共有なしサンプルを区別する。
+- [AMPLS の DNS 構成](https://learn.microsoft.com/en-us/azure/azure-monitor/fundamentals/private-link-configure#review-endpoints-dns-settings)：5 ゾーンの公式構成を確認。
+
+### 検証と制限
+
+- 配布 ARM を再生成し、静的テスト **10 / 10 成功**。WS 固定指定、ASE 既定保持、条件付き File 除外・予約サブネット除外、DNS インデックス変更後の AMPLS 関連付け、PE / DNS 個数、既存のダミーデータ・出力契約を検証した。
+- 顧客向け README・導入・受入表と提供者向け保守資料へ判断理由・個数・未検証範囲を反映。
+- Azure のデプロイ・設定変更・PE / DNS 削除・再起動・実行はしていない。既存構成でのダミー実行成功を、File 除外後の動作証明としない。新しい最小構成での portal 保存・永続化・再起動・実行の受入が必要。
+- 既存環境へ基盤の再投入を推奨しない。Incremental では旧 File リソースは自動削除されず、後追加サブネットとの競合もある。共有利用調査・変更承認・復旧手順を別途用意してから整理する。
+
+## 18. Log Analytics を閉域対象外とした最終構成（2026-10-21）
+
+ユーザーの「Azure Log Analytics は閉域の対象から外して OK」という追加指示に従い、顧客用の LAW 問い合わせを **公開 Query API + マネージド ID** に変更した。匿名アクセスやキー認証を許可する変更ではない。公開取り込みは今回必要ないため無効のままにする。
+
+### 最終構成
+
+- 残す PE：ホスト Blob / Queue / Table の 3 個、出力 Blob 1 個、アプリサイト 1 個の **計 5 個**。
+- 残す DNS：`privatelink.blob.core.windows.net`、`privatelink.queue.core.windows.net`、`privatelink.table.core.windows.net`、`privatelink.azurewebsites.net` の **計 4 ゾーン**。Blob はホスト・出力で共用。
+- 除外：File PE / DNS、AMPLS 本体・LAW 関連付け・PE・DNS ゾーングループ、Monitor / OMS / ODS / agentsvc の DNS とリンク、未使用 PoC サブネット。
+- LAW：公開クエリ有効、公開取り込み無効。システム割り当て MI の Log Analytics Reader と HTTP 認証 audience は維持。ワークフローのクエリ URI・認証・ダミーデータ・出力契約は変更しない。
+- 通信：Storage / サイトは閉域のまま。LAW 用に `api.loganalytics.azure.com:443` の公開 DNS 解決と HTTPS 送信を許可する。VNet 統合 / UDR / ファイアウォール、既存 AMPLS / 共有 DNS の影響を導入前に確認する。不要な NAT / 実行 VM を自動追加しない。
+- 共有基盤は既定 `privateLogAnalytics=true` で元 PoC を保持。顧客用ラッパーは `hostingMode=ws` / `privateLogAnalytics=false` を固定指定し、ARM の条件付きリソースで AMPLS 一式を非作成とする。DNS の参照は可変の添字固定ではなくゾーン名から解決する。
+
+### 検証と未実施範囲
+
+- Microsoft Learn の [公開 Query API と Entra ID 認証](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/api/access-api)、[Private Link と DNS の関係](https://learn.microsoft.com/en-us/azure/azure-monitor/fundamentals/private-link-security)を確認した。
+- Bicep ビルドと顧客 ARM 再生成に成功。静的テスト **10 / 10 成功**。顧客の固定フラグ、LAW 公開クエリ条件、非公開 Storage、AMPLS 全 4 リソースの非作成条件、Monitor DNS 除外条件、DNS 名による参照、PE 5 個・DNS 4 ゾーン、元 PoC の既定値保持を確認した。既存の BCP334・未使用パラメーター警告は継続、新しいビルドエラーはない。
+- 入口 README、顧客 README・導入・運用・受入確認、保守資料、コンテキストを最終構成へ更新。LAW の外部クエリ拒否は受入条件から外し、MI / RBAC と公開 API の到達性を確認する。
+- **Azure の作成・設定変更・削除・再実行はしていない**。File / AMPLS を外した現行構成の実機受入は未実施。既存環境は変えていないため、移行する場合は公開クエリ設定・送信・DNS の影響と共有利用を確認し、変更承認・復旧手順を別途用意する。
+
+## 19. Storage 統合・コネクタ中心への再設計と実機検証（2026-10-21）
+
+ユーザーの最終見直し依頼に対応する更新。§18 の Storage 2 個・PE 5 個の案からさらに削減した。今回のコネクタ版を Azure へ実投入し、保存済み CSV の独立読み戻しまで成功。旧 HTTP 版の実績ではなく、この構成で得た証拠を以下に記録する。
+
+### 構成と変更
+
+- 顧客用は **Storage 1 個**。ホスト内部データと `exports` を同居させ、Blob PE を共用する。ホスト UAMI の 4 ロールはアカウント全体で保持し、アプリ system MI の Storage Blob Data Contributor と取得者の Data Reader は **exports コンテナースコープ**に限定する。アカウント単位の管理境界・保管規制が必要なら別設計を承認する。
+- PE は Blob / Queue / Table / サイトの **4 個**、Private DNS は blob / queue / table / azurewebsites の **4 ゾーン**、サブネットは PE 用と VNet 統合用の **2 個**。Queue / Table は Stateful 実行基盤の依存なので残す。
+- 不要な出力専用 Storage / Blob PE、Files の共有・PE・DNS、AMPLS / Monitor 系 DNS、ASE / NAT / Bastion / VM と未使用予約サブネットは作成しない。LAW 公開問い合わせ有効・公開取り込み無効、Storage / サイト非公開・共有キー無効を維持する。
+- Blob 保存は組み込み `uploadBlob`。CSV 変換・条件分岐等も組み込み。Azure Monitor Logs には組み込み版がないため、管理コネクタ `Run query and list results`（`QueryDataV2`）を採用し、V2 API 接続 1 個とアプリ MI のアクセスポリシーを第 3 段階で追加する。ワークフローから HTTP アクション・REST ヘッダー・直接 API URI を除去した。
+- 管理コネクタの **応答約 16 MiB、50 万行、クエリ最大 100 秒 / コネクタ最大 110 秒**へ制限が変わる。以前の直接 API の容量・タイムアウトを踏襲できない。Basic / Auxiliary テーブルもコネクタの対象外。対象のプラン・量は本番前に確認する。
+- `error` / `PartialError` は失敗。`value` 配列と各行 `bag` を Parse JSON で必須検証し、本文欠損を `coalesce([], ...)` で 0 件成功へ変換しない。50 万行以上・列不一致の停止、BOM、0 件ヘッダー、月境界、run ごとの保存と最後の current 更新は維持。トリガーの同時実行数は 1 とし、失敗メッセージで current 不変を無条件に断言しない。
+- 設定は LAW_RESOURCE_ID（GUID ではなく ARM ID）、OUT_BLOB_URI、MONITOR_* 3 項目、MONTH_OVERRIDE、COLUMNS、KQL_BODY の **8 項目**。接続 JSON の portal 保存と Query の時間範囲をデザイナーで「Set in query」にする手順を追加した。時間範囲種別は実コネクタの動的メタデータで `"3"` と確認し、`timerangetype: "3"` / `timerange: {}` を配布定義に反映した。portal の画面操作自体は未実証で、環境固有の設定・接続・開始日時の入力は引き続き必要。
+- 顧客 README に Mermaid 構成図を追加。導入・運用・受入表も更新。共有基盤の既定 3 パラメーターは旧 PoC のリソース構成を維持するが、ワークフロー正本は管理コネクタ版なので旧閉域 LAW の手順へそのまま流用しない。
+
+### 仕様確認
+
+- [Blob 組み込みコネクタ](https://learn.microsoft.com/en-us/azure/logic-apps/connectors/built-in/reference/azureblob/)で MI、`uploadBlob` の containerName / blobName / content / overrideIfExists、`readBlob` による保存実体の読み戻しを確認。
+- [Azure Monitor Logs](https://learn.microsoft.com/en-us/azure/connectors/connectors-azure-monitor-logs)と[コネクタ参照](https://learn.microsoft.com/en-us/connectors/azuremonitorlogs/)で MI、V2 操作、応答制限を確認。Azure の管理 API から公開される現リージョンのコネクタ Swagger を読み取り、`POST /queryDataV2`、body の query / timerangetype / timerange、返却 value / error と `managedIdentityAuth` を確認した。実アプリから `POST /getTimeRangeTypes` を実行し、Relative=`2`、Exact=`1`、Set in query=`3` を取得した。
+- [MI 接続の ARM / JSON](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)の Standard 用 V2・parameterValueSet・accessPolicies と、内部トークンストア / 対象サービスの 2 段階の MI 認証を参照。
+
+### 実施した検証
+
+- Bicep ビルドと配布物再生成・`--check` 一致、静的テスト **12 / 12 成功**、`git diff --check` 成功。Storage / PE の条件、旧基盤既定保持、コンテナースコープ、MI 接続、HTTP 不使用、必須応答検証・排他設定、出力契約、設定 / リンク / 具体的開始日時と、削除時の既存 RG / プラン保護の注意を検査した。配布物と関連資料に今回の実環境識別子が混ざっていないことも確認。これはワークフローを Azure で実行するテストではない。
+- 顧客版の基盤 ARM に対して、指定された評価用 RG / Southeast Asia で `az deployment group validate` が Succeeded、error なし。`what-if` も Succeeded。Storage 1 個・基盤 PE 3 個・Storage DNS 3 ゾーン・LAW・VNet・UAMI・コンテナー・ホスト RBAC の作成だけを予測し、既存 WS1 は Ignore。出力専用 Storage / PE、Files、AMPLS は作成対象外、既存資源の削除予測なし。
+- 当初の読み取り調査時、指定 RG には既存 WS1 プランだけが残っていた。一度は確認フォームに応答がなく事前検証で保留したが、その後のユーザーの自律続行指示を受け、提示した範囲の検証を再開した。既存 RG / WS1 は保持・再利用し、識別可能な新アプリ・基盤・接続・RBAC だけを追加した。新しい WS1 プランは作成していない。
+
+### 実機の構築・接続で確定した差異
+
+- 基盤・アプリ・アクセスの各段階で validate / what-if を確認後に実投入し、全段階が Succeeded。既存プランの変更・削除なし。API 接続 V2 と accessPolicy の ARM も成功し、Bicep 型警告だけでは実サービスの可否を判断しないことを確認した。
+- ホストは Storage 1 個・共有キー無効・非公開・コンテンツ共有なしで起動。実一覧でも Storage 1、PE 4、DNS 4、サブネット 2、API 接続 1。PE は全件 Approved。Storage の PNA / Shared Key / 匿名アクセスとサイト PNA が無効。アプリ system MI の実ロールは exports スコープの Blob Data Contributor と LAW の Log Analytics Reader のみで、API accessPolicy の principal も一致した。
+- Monitor Logs のメタデータ取得は成功しても、Query は最初 `Token not found` で失敗した。対象サービスの認証設定に管理用 audience だけでなく **`additionalAudiences: ["https://api.loganalytics.io"]`** が必要。修正後に Query 成功。[Microsoft の接続生成実装](https://github.com/Azure/LogicAppsUX/blob/main/libs/designer/src/lib/core/actions/bjsworkflow/connections.ts)が `additionalResourceUris` からこの設定を作ることも照合した。
+- Blob 組み込みは当初 endpoint 不足で失敗。実ホストの `/operationGroups/AzureBlob` メタデータを確認し、正式な **`blobStorageEndpoint`** と **`managedIdentityType: "SystemAssigned"`** に修正した。ホスト UAMI へ権限を迂回せず、exports のみのアプリ system MI で保存・読み戻しに成功。
+- 検証用 Recurrence を 2099 年にすると「49 年以上未来は不可」で Unhealthy になった。検証コピーは `2026-12-05T09:00:00`、Tokyo Standard Time に修正。正本に固定開始日時は埋めず、顧客手順にはコピペ可能な例と実際の承認済み将来日時へ置換する条件を維持した。
+- 設定変更・明示再起動の直後には ServiceUnavailable が一時的に出た。管理一覧が Healthy でも VFS 読み取りの準備が遅れる場合があり、既知の起動中エラーだけを上限付きで待機してから確認した。失敗を空成功へ変換していない。
+
+### 実行と保存済み Blob の照合
+
+本体と独立した確認用 Stateful ワークフローを同じ閉域実行基盤に置き、Blob 組み込み `readBlob` で **保存済み current → その path の manifest → CSV** を取得した。アップロード入力・201 応答・履歴の Succeeded だけでは合格にしていない。公開化・共有キー・SAS・SecurityControl タグ・検証用 VM は使っていない。
+
+| ケース | 本体と独立読み戻しの結果 |
+|---|---|
+| `2026-01` | Succeeded、4 件、Id=2,3,4,5、233 bytes |
+| `2025-11` | Succeeded、0 件、26 bytes。BOM + `TimeGenerated,Id,Text\r\n` とバイト単位で一致 |
+| `2026-02` | Succeeded、1 件、Id=6、75 bytes。月末の終了境界が翌月に入ることを確認 |
+| 同月再実行 | 新 run に保存して current を更新。初回 run の CSV / manifest も後から直接読み、ハッシュ・runId・4 件が変わらず保持されていることを確認 |
+| 列を WrongColumn | Failed。保存済み current を再取得し、直前成功 run のまま。CSV も再照合 |
+| 不正 KQL | Failed。同様に current 不変と直前成功 CSV を再照合 |
+| 明示再起動 | connections の保持と再実行・4 件の読み戻し成功。さらに別の再起動で host / connections / workflow の各 JSON が変更なく残ることを比較し、**本体を再配置せず**手動実行・4 件の独立読み戻しまで成功 |
+
+CSV パーサーで論理レコードを読み、列順・全 Id / UTC 日時 / Text、日本語・カンマ・引用符・埋め込み改行、UTF-8 BOM を比較した。Storage の Content-MD5 と取得バイトの MD5、保存サイズも一致。manifest の rowCount は JSON 数値で、month / UTC 窓 / runId / files、current の runId / path が一致した。1 月 CSV の SHA-256 は `63d0f75b814db2df09bab7992bbcbb8833f5f517fc35e3654a4ab43bddc1d3a6`。他月のハッシュは[顧客向け受入確認](../customer/docs/validation.md)に記載。
+
+組み込み uploadBlob は CSV / JSON とも MIME を `text/plain; charset=utf-8` として保存した。旧 HTTP 版の `text/csv` / `application/json` とは異なるが、本文・BOM・拡張子は正しい。顧客運用手順にもこの差異を記載した。Content-Type が必須の連携先には、このまま適合すると保証しない。
+
+### 後片付けと残る確認
+
+検証 CSV と証拠を保全後、今回作成したアプリ・接続・PE / NIC・DNS / リンク・VNet・Storage・ID・LAW の **22 資源**と **6 ロール割り当て**を削除した。RG 外の診断設定は今回作成していない。LAW は通常削除であり、サービス側の論理削除保持データを消去した意味ではない。
+
+**削除時の事故と復旧**: 保持予定の既存 WS1 プランも、最後の検証アプリの削除に連動して消えた。提供者の汎用 `az resource delete` が、サイト DELETE の `deleteEmptyServerFarm=false` を明示していなかったことが原因。[Microsoft Learn の Web Apps Delete 仕様](https://learn.microsoft.com/en-us/rest/api/appservice/web-apps/delete?view=rest-appservice-2024-04-01)はこのパラメーター省略時に空プランを削除すると記載しており、アプリとプランの削除記録は同じ要求相関 ID だった。ID の除外リストを用意するだけではこの副作用を防げず、保持に失敗した。ユーザーに確認フォームで事故と復旧方針を提示し、不在時は依頼の前提を戻す方針を選んだ。
+
+元の Azure デプロイ記録を保全し、元と検証時のプラン宣言が同一であることを確認した。その宣言 1 個だけの Bicep を用意して標準 azure-validate を完了し、ARM validate 成功・what-if の実 JSON で Create 1 / Modify 0 / Delete 0 を確認後に再投入した。再作成は Succeeded。直接 GET で **同一リソース ID・元の Southeast Asia・WS1 / WorkflowStandard・kind elastic・maximumElasticWorkerCount 1・アプリ 0 件・Ready** を確認。指定 RG はこの復旧プラン 1 個のみで、検証資源とそのスコープのロール割り当ては残っていない。ただし既存プランを無変更で保持できたのではなく、**同名・元の宣言で再作成した復旧**である。元プランの GET 全文を事前保全していなかったため、宣言外の動的属性まで同一とは保証しない。
+
+再発防止として、提供者の削除では `deleteEmptyServerFarm=false` を必須とし、事前のプラン GET 全文保全・削除後の直接照合を作業指示と保守資料に追加した。顧客手順にも、既存 RG は削除しない、関連プランを削除対象に含めない、保持を明示できなければ停止する、という条件を追加した。今後の検証はこの注意を含めて承認範囲を管理する。
+
+**見直し構成の実行と CSV 格納・内容の確認は成功**。ただし提供者の CLI / 管理 API による検証であり、portal だけでの新規構築・接続編集保存・CSV 取得は未実証。WS1 の公式サポート、実月次発火、本番量・性能、50 万行の境界実行、PartialError / 不正応答の実発生、同時実行の待ちキュー・再送・別アプリ間の排他も未確認。これらを検証済みと記載しない。
+
+## 20. 公開参照リンクの整備（2026-10-21）
+
+顧客向けの入口・導入・受入・運用手順と、提供者向けの README・コンテキスト・保守資料・本書に、参照した公開情報のリンクを補った。主な対象は WS1 のサポート停止条件、Storage / PE / DNS、MI / RBAC、コネクタの制限、Recurrence、実行履歴の機密性、最後のアプリ削除時のプラン保持である。追加 audience の根拠に用いた Microsoft 公開実装もリンクし、公式仕様・公開実装・実機結果を区別した。構成・配布 JSON は変更せず、この資料整備では Azure の追加操作・再検証を実施していない。
+
+資料関連の既存静的テスト 4 件（接続・設定手順、削除安全性、識別子混入、配布内のローカル Markdown リンク）はすべて成功。`git diff --check` も成功した。外部リンクの内容確認と、ローカルリンクの自動検査は別の確認として扱う。
+
+## 21. Consumption 案の再検討（2026-10-21）
+
+### 要件の明確化と判断
+
+お客様の要望は **Storage Account のネットワーク設定で Public を拒否すること**であり、「閉域化」は Private Endpoint を必須とする意味ではなかった。これまでの計画に含めた「Public 拒否 = Private Endpoint 必須」という前提を修正する。ユーザーから Consumption を使う案での再検討を指示された。
+
+**Consumption + システム割り当て MI + 2 個の管理コネクタを第一候補**にする。Storage の信頼されたサービスの例外を利用し、実行用の VNet 統合・PE・Private DNS と、顧客所有のホスト用 Storage を省く。キー / SAS / シークレットや HTTP アクションによる REST API の直書きは使わない。
+
+これは設計案であり、Consumption 版の実装・Azure 実機検証・顧客配布物の置換はまだ行っていない。§19 の WS1 の保存・読み戻し結果を、この案の証拠として扱わない。
+
+### 公開仕様で確認した範囲
+
+- [Storage の信頼されたサービス一覧](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-trusted-azure-services)には `Microsoft.Logic/workflows` が含まれる。MI / RBAC だけで任意のクライアントがネットワーク制限を回避できるという意味ではない。
+- [Blob のファイアウォール越し接続](https://learn.microsoft.com/en-us/azure/connectors/connectors-create-api-azureblobstorage#access-blob-storage-in-same-region-with-system-managed-identities)は、Consumption の Blob 管理コネクタと**システム割り当て MI**を案内し、この方法は Standard に適用されない、ユーザー割り当て MI は使えないと明記する。
+- [Storage の制約・注意事項](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-limitations)は、信頼されたサービスのアクセスが他のネットワーク制限より優先され、Public network access を Disabled に変更しても設定済みの例外が有効で、アクセスできる場合があると説明する。例外経由は公開エンドポイントへの許可であり、Private Endpoint による接続ではない。
+- [MI 対応コネクタ一覧・接続 ARM](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)の Consumption 一覧には Azure Blob Storage と Azure Monitor Logs があり、Consumption の API 接続は `kind: V1` の例がある。Standard の V2 接続 JSON とアクセスポリシーをそのままコピーしない。
+- [Azure Monitor Logs 参照](https://learn.microsoft.com/en-us/connectors/azuremonitorlogs/)は MI と `QueryDataV2` を提供する。[管理コネクタの制限](https://learn.microsoft.com/en-us/azure/connectors/connectors-azure-monitor-logs)は約 16 MiB、最大 500,000 行、クエリ 100 秒 / コネクタ 110 秒、Basic / Auxiliary 非対応であり、Consumption に変えてもなくならない。
+- [Consumption の portal 作成手順](https://learn.microsoft.com/en-us/azure/logic-apps/quickstart-create-example-consumption-workflow)を採用し、Standard の WS プラン・ホストファイル配置を前提にしない。
+
+**重要な未検証点**：Blob の公式手順は Public network access が「選択した仮想ネットワークと IP アドレスから有効」の例である。Storage の Disabled 後の例外優先の説明だけで、**初回から Disabled で作成する構成の成功を保証しない**。最初から Disabled と例外を設定して検証し、失敗時に Public を一時有効化する手順へ逃げない。
+
+### 構成図と最小資源
+
+```mermaid
+flowchart LR
+  Portal["操作者 / Azure portal<br/>管理操作は RBAC"]
+  LA["Logic Apps Consumption<br/>システム割り当て MI"]
+  Monitor["管理接続 1<br/>Azure Monitor Logs / MI"]
+  LAW["Log Analytics Workspace<br/>公開クエリ / Entra 認可"]
+  CSV["組み込みアクション<br/>期間計算・検証・CSV 変換"]
+  Blob["管理接続 2<br/>Azure Blob Storage / MI"]
+  Storage["保存用 Storage / exports<br/>Public Disabled + 信頼されたサービスの例外<br/>Shared Key / 匿名アクセス無効"]
+  Portal --> LA
+  LA --> Monitor --> LAW
+  Monitor --> CSV --> Blob --> Storage
+```
+
+図は設計案である。Storage の例外による接続の実機結果や、操作者から Storage への直接アクセスを表していない。
+
+| 資源 | 数 | 目的 |
+|---|---:|---|
+| Logic App Consumption | 1 | Recurrence、月次処理、実行履歴。システム MI を有効化 |
+| 保存用 Storage Account | 1 | CSV / manifest / current の保存のみ。ホスト用途を持たせない |
+| exports コンテナー | 1 | 保存用 Storage の子リソース。アプリ MI のデータ権限を限定 |
+| API 接続 | 2 | Monitor Logs と Blob の管理コネクタ。双方 MI 認証 |
+| Log Analytics Workspace | 1 | 原則既存を使用。ダミー KQL の実行にも必要 |
+| アプリ MI のロール割り当て | 2 | LAW の Log Analytics Reader、exports の Storage Blob Data Contributor |
+
+RG は承認された配置先を使う。システム MI は Logic App に付随し、別のユーザー割り当て ID は作らない。操作者の構築権限・ロール割り当て権限・データ取得権限は別途必要。
+
+**実行のためには不要にするもの**：WS1 / App Service プラン、ホスト用 Blob / Queue / Table の権限と設定、VNet / サブネット、PE / Private DNS、Files、AMPLS、ASE、VM / Bastion / NAT。CSV 取得のために別途必要なネットワークを、この「実行のために不要」という判断で消さない。
+
+### Storage とアクセス権の候補設定
+
+| 項目 | 候補値・条件 |
+|---|---|
+| publicNetworkAccess | **Disabled を初回から維持** |
+| networkAcls.defaultAction | Deny |
+| networkAcls.bypass | AzureServices。信頼されたサービスの例外を許容することを確認 |
+| allowSharedKeyAccess | false |
+| allowBlobPublicAccess | false |
+| IP / 仮想ネットワークの許可ルール | 実行経路には追加しない |
+| Blob へのデータ認可 | Logic App のシステム MI に exports スコープの Data Contributor |
+
+例外はネットワークを「この Logic App 1 個だけ」に絞る設定ではない。他の信頼されたサービスの扱いと既存のデータ権限を含めて確認し、例外許可とデータ RBAC を区別する。`SecurityControl=Ignore` を付けてネットワークを開放することは、この最終構成の成立条件にしない。
+
+### 現行資材からの変更
+
+| 現行 WS1 版 | Consumption 案 |
+|---|---|
+| `Microsoft.Web/sites`、WS1、ホスト用 UAMI と Storage 設定 | `Microsoft.Logic/workflows` とシステム MI。顧客所有のホスト Storage は不要 |
+| Blob 組み込み `ServiceProvider` | Blob 管理 `ApiConnection`。Consumption に同じ組み込み Blob コネクタはないため、管理版を使う |
+| Monitor Logs 管理コネクタ | 維持。ただし接続リソースとワークフローの接続参照を Consumption 用に変更 |
+| `appsetting()`、環境変数 | [ワークフローの parameters](https://learn.microsoft.com/en-us/azure/logic-apps/workflow-definition-language-schema) に KQL / 列 / 対象月 / 対象 LAW 等を移す |
+| host.json / connections.json / workflow ファイル配置 | Consumption のワークフロー定義と API 接続。portal の作成・コードビュー・パラメーター編集を使う |
+| HTTP を使わない CSV 作成・異常判定・月境界計算 | 組み込みデータ操作・条件・Scope を維持し、Consumption で再検証 |
+
+毎月 5 日 09:00 JST、前月の開始以上・翌月開始未満、UTF-8 BOM、列順、0 件ヘッダー、run ごとの CSV / manifest と最後の current 更新、不正応答を成功扱いにしない方針は維持する。Recurrence の同時実行数 1 と有限リトライを設定し、HTTP 要求トリガーや匿名の CSV 取得口は作らない。Blob の保存 MIME / 上書き・再試行の挙動は管理コネクタで再確認し、WS1 の実測値を流用しない。
+
+### CSV 取得と残る条件
+
+- 信頼されたサービスの例外は、操作者のブラウザーに適用されない。Data Reader があっても、Public Disabled の Storage へ portal から直接ダウンロードできるとは保証しない。
+- 既存の閉域取得経路を使うなら、その Blob PE / DNS 等は**取得用の別条件**として残す。Logic App の VNet 統合が必要になる理由とは分ける。
+- 閉域経路を使わない取得は、Logic App 経由などの承認済み取得フローを別途設計・実機確認する。実行履歴に CSV が表示されることを、CSV ファイルの取得成功と同一視しない。
+- 従来資料に含めた Logic App 自体の非公開化が別の必須条件なら、この通常のマルチテナント Consumption 案とは整合を取り直す。
+- 顧客操作は portal のみを維持する。管理コネクタの作成・MI 設定・パラメーター変更・保存・手動実行まで portal で確認する。
+
+### 実機検証のゲート
+
+今回の再検討では Azure の作成・変更・削除を行っていない。後続の実機検証は、構成・費用・権限・信頼されたサービスの例外許可の承認後、専用 RG で実施する。
+
+1. 初回から PNA Disabled / Shared Key false / 匿名 false / AzureServices の Storage と、システム MI の Consumption を構築。MI の反映を確認し、キーや Public 有効化なしで接続する。
+2. 既存ダミー KQL で 2026-01 の 4 件、2025-11 の 0 件、2026-02 の 1 件を保存。保存済み current → manifest → CSV を独立読み戻しし、BOM・全値・件数・列順・保存メタデータを検査する。
+3. 同月再実行と旧 run 保持、不正 KQL・列不一致・権限不足時の Failed と current 不変、有限リトライ・重複実行制御を確認する。
+4. 公開ネットワークの通常クライアントを、データ権限のある Entra 認証でも拒否することを確認する。認証不足による 403 とネットワーク拒否を区別する。
+5. 承認済み経路で portal のみの構築・編集保存・手動実行・実 CSV 取得を実証し、機密データの実行履歴への露出・保持も確認する。短周期の発火確認を実月次発火の証明としない。
+6. 専用 RG と RG 外の今回作成物を削除・残存確認。既存 WS1 プランは検証に使わず、変更・削除しない。
+
+以上に合格してから顧客配布物を Consumption 版へ一括更新する。失敗・未実施が残る段階で、現行テンプレートの種別や接続だけを部分的に置換しない。
+
+今回の確認は公開仕様の調査と設計資料の更新のみ。既存配布物の資料関連テスト 4 件と、更新した資料の `git diff --check` は成功したが、これを Consumption の実行・接続・CSV 保存の検証結果とは扱わない。

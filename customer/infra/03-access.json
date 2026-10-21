@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "5671145888530000276"
+      "templateHash": "13339642068114702306"
     }
   },
   "parameters": {
@@ -30,8 +30,8 @@
     {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('outSaName'))]",
-      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('outSaName')), resourceId('Microsoft.Web/sites', parameters('appName')), 'blob-contributor')]",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', split(format('{0}/default/exports', parameters('outSaName')), '/')[0], split(format('{0}/default/exports', parameters('outSaName')), '/')[1], split(format('{0}/default/exports', parameters('outSaName')), '/')[2])]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', split(format('{0}/default/exports', parameters('outSaName')), '/')[0], split(format('{0}/default/exports', parameters('outSaName')), '/')[1], split(format('{0}/default/exports', parameters('outSaName')), '/')[2]), resourceId('Microsoft.Web/sites', parameters('appName')), 'blob-contributor')]",
       "properties": {
         "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('appName')), '2023-12-01', 'full').identity.principalId]",
         "principalType": "ServicePrincipal",
@@ -48,6 +48,41 @@
         "principalType": "ServicePrincipal",
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '73c42c96-874c-492b-b04d-ab87d138a893')]"
       }
+    },
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2016-06-01",
+      "name": "[format('{0}-logs', parameters('appName'))]",
+      "location": "[parameters('location')]",
+      "kind": "V2",
+      "properties": {
+        "displayName": "Log Analytics managed identity",
+        "api": {
+          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuremonitorlogs')]"
+        },
+        "parameterValueSet": {
+          "name": "managedIdentityAuth",
+          "values": {}
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/connections/accessPolicies",
+      "apiVersion": "2016-06-01",
+      "name": "[format('{0}/{1}', format('{0}-logs', parameters('appName')), parameters('appName'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "principal": {
+          "type": "ActiveDirectory",
+          "identity": {
+            "objectId": "[reference(resourceId('Microsoft.Web/sites', parameters('appName')), '2023-12-01', 'full').identity.principalId]",
+            "tenantId": "[subscription().tenantId]"
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', format('{0}-logs', parameters('appName')))]"
+      ]
     },
     {
       "type": "Microsoft.Network/privateDnsZones",
@@ -120,6 +155,18 @@
     "privateEndpointName": {
       "type": "string",
       "value": "[format('{0}-pe', parameters('appName'))]"
+    },
+    "monitorApiId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/connections', format('{0}-logs', parameters('appName'))), '2016-06-01').api.id]"
+    },
+    "monitorConnectionId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Web/connections', format('{0}-logs', parameters('appName')))]"
+    },
+    "monitorConnectionRuntimeUrl": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/connections', format('{0}-logs', parameters('appName'))), '2016-06-01').connectionRuntimeUrl]"
     }
   }
 }

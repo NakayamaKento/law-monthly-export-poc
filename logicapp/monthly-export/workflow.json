@@ -11,12 +11,7 @@
           "timeZone": "Tokyo Standard Time",
           "schedule": { "monthDays": [5], "hours": [9], "minutes": [0] }
         },
-        "evaluatedRecurrence": {
-          "frequency": "Month",
-          "interval": 1,
-          "timeZone": "Tokyo Standard Time",
-          "schedule": { "monthDays": [5], "hours": [9], "minutes": [0] }
-        }
+        "runtimeConfiguration": { "concurrency": { "runs": 1 } }
       }
     },
     "actions": {
@@ -65,14 +60,23 @@
             "inputs": "@concat('let start=datetime(', outputs('StartUtc'), '); let end=datetime(', outputs('EndUtc'), '); ', outputs('Settings_KqlBody'))"
           },
           "Query": {
-            "type": "Http",
+            "type": "ApiConnection",
             "runAfter": { "QueryText": ["Succeeded"] },
             "inputs": {
-              "method": "POST",
-              "uri": "https://api.loganalytics.azure.com/v1/workspaces/@{appsetting('LAW_ID')}/query",
-              "headers": { "Content-Type": "application/json", "Prefer": "wait=180" },
-              "body": { "query": "@outputs('QueryText')" },
-              "authentication": { "type": "ManagedServiceIdentity", "audience": "https://api.loganalytics.io" },
+              "host": { "connection": { "referenceName": "azuremonitorlogs" } },
+              "method": "post",
+              "path": "/queryDataV2",
+              "queries": {
+                "subscriptions": "@split(appsetting('LAW_RESOURCE_ID'), '/')[2]",
+                "resourcegroups": "@split(appsetting('LAW_RESOURCE_ID'), '/')[4]",
+                "resourcetype": "Log Analytics Workspace",
+                "resourcename": "@split(appsetting('LAW_RESOURCE_ID'), '/')[8]"
+              },
+              "body": {
+                "query": "@outputs('QueryText')",
+                "timerangetype": "3",
+                "timerange": {}
+              },
               "retryPolicy": { "type": "fixed", "count": 3, "interval": "PT30S" }
             }
           },
@@ -89,14 +93,26 @@
             "else": { "actions": {} }
           },
           "Rows": {
-            "type": "Compose",
+            "type": "ParseJson",
             "runAfter": { "Check_Query_Error": ["Succeeded"] },
-            "inputs": "@coalesce(body('Query')?['tables']?[0]?['rows'], json('[]'))"
+            "inputs": {
+              "content": "@body('Query')",
+              "schema": {
+                "type": "object",
+                "required": ["value"],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": { "type": "object", "required": ["bag"] }
+                  }
+                }
+              }
+            }
           },
           "RowCount": {
             "type": "Compose",
             "runAfter": { "Rows": ["Succeeded"] },
-            "inputs": "@length(outputs('Rows'))"
+            "inputs": "@length(body('Rows')['value'])"
           },
           "Check_Row_Cap": {
             "type": "If",
@@ -113,7 +129,7 @@
           "Records": {
             "type": "Select",
             "runAfter": { "Check_Row_Cap": ["Succeeded"] },
-            "inputs": { "from": "@outputs('Rows')", "select": "@json(string(item()?[0]))" }
+            "inputs": { "from": "@body('Rows')['value']", "select": "@json(string(item()['bag']))" }
           },
           "Create_CSV_table": {
             "type": "Table",
@@ -138,46 +154,77 @@
             "else": { "actions": {} }
           },
           "Upload_CSV": {
-            "type": "Http",
+            "type": "ServiceProvider",
             "runAfter": { "Check_Header": ["Succeeded"] },
             "inputs": {
-              "method": "PUT",
-              "uri": "@{appsetting('OUT_BLOB_URI')}/exports/@{outputs('Month')}/runs/@{workflow().run.name}/export.csv",
-              "headers": { "x-ms-blob-type": "BlockBlob", "x-ms-version": "2023-11-03", "Content-Type": "text/csv; charset=utf-8" },
-              "body": "@concat(uriComponentToString('%EF%BB%BF'), outputs('CsvText'))",
-              "authentication": { "type": "ManagedServiceIdentity", "audience": "https://storage.azure.com/" },
+              "serviceProviderConfiguration": {
+                "connectionName": "AzureBlob",
+                "operationId": "uploadBlob",
+                "serviceProviderId": "/serviceProviders/AzureBlob"
+              },
+              "parameters": {
+                "containerName": "exports",
+                "blobName": "@{outputs('Month')}/runs/@{workflow().run.name}/export.csv",
+                "content": "@concat(uriComponentToString('%EF%BB%BF'), outputs('CsvText'))",
+                "overrideIfExists": "true"
+              },
               "retryPolicy": { "type": "fixed", "count": 3, "interval": "PT10S" }
+            }
+          },
+          "Manifest": {
+            "type": "Compose",
+            "runAfter": { "Upload_CSV": ["Succeeded"] },
+            "inputs": {
+              "month": "@{outputs('Month')}",
+              "runId": "@{workflow().run.name}",
+              "windowStartUtc": "@{outputs('StartUtc')}",
+              "windowEndUtc": "@{outputs('EndUtc')}",
+              "rowCount": "@outputs('RowCount')",
+              "files": ["export.csv"],
+              "completedAtUtc": "@{utcNow()}"
             }
           },
           "Upload_Manifest": {
-            "type": "Http",
-            "runAfter": { "Upload_CSV": ["Succeeded"] },
+            "type": "ServiceProvider",
+            "runAfter": { "Manifest": ["Succeeded"] },
             "inputs": {
-              "method": "PUT",
-              "uri": "@{appsetting('OUT_BLOB_URI')}/exports/@{outputs('Month')}/runs/@{workflow().run.name}/manifest.json",
-              "headers": { "x-ms-blob-type": "BlockBlob", "x-ms-version": "2023-11-03", "Content-Type": "application/json" },
-              "body": {
-                "month": "@{outputs('Month')}",
-                "runId": "@{workflow().run.name}",
-                "windowStartUtc": "@{outputs('StartUtc')}",
-                "windowEndUtc": "@{outputs('EndUtc')}",
-                "rowCount": "@outputs('RowCount')",
-                "files": ["export.csv"],
-                "completedAtUtc": "@{utcNow()}"
+              "serviceProviderConfiguration": {
+                "connectionName": "AzureBlob",
+                "operationId": "uploadBlob",
+                "serviceProviderId": "/serviceProviders/AzureBlob"
               },
-              "authentication": { "type": "ManagedServiceIdentity", "audience": "https://storage.azure.com/" },
+              "parameters": {
+                "containerName": "exports",
+                "blobName": "@{outputs('Month')}/runs/@{workflow().run.name}/manifest.json",
+                "content": "@string(outputs('Manifest'))",
+                "overrideIfExists": "true"
+              },
               "retryPolicy": { "type": "fixed", "count": 3, "interval": "PT10S" }
             }
           },
-          "Upload_Current": {
-            "type": "Http",
+          "Current": {
+            "type": "Compose",
             "runAfter": { "Upload_Manifest": ["Succeeded"] },
             "inputs": {
-              "method": "PUT",
-              "uri": "@{appsetting('OUT_BLOB_URI')}/exports/@{outputs('Month')}/current.json",
-              "headers": { "x-ms-blob-type": "BlockBlob", "x-ms-version": "2023-11-03", "Content-Type": "application/json" },
-              "body": { "runId": "@{workflow().run.name}", "path": "@{outputs('Month')}/runs/@{workflow().run.name}/" },
-              "authentication": { "type": "ManagedServiceIdentity", "audience": "https://storage.azure.com/" },
+              "runId": "@{workflow().run.name}",
+              "path": "@{outputs('Month')}/runs/@{workflow().run.name}/"
+            }
+          },
+          "Upload_Current": {
+            "type": "ServiceProvider",
+            "runAfter": { "Current": ["Succeeded"] },
+            "inputs": {
+              "serviceProviderConfiguration": {
+                "connectionName": "AzureBlob",
+                "operationId": "uploadBlob",
+                "serviceProviderId": "/serviceProviders/AzureBlob"
+              },
+              "parameters": {
+                "containerName": "exports",
+                "blobName": "@{outputs('Month')}/current.json",
+                "content": "@string(outputs('Current'))",
+                "overrideIfExists": "true"
+              },
               "retryPolicy": { "type": "fixed", "count": 3, "interval": "PT10S" }
             }
           }
@@ -186,7 +233,7 @@
       "Fail_if_Export_Failed": {
         "type": "Terminate",
         "runAfter": { "Export": ["Failed", "TimedOut"] },
-        "inputs": { "runStatus": "Failed", "runError": { "code": "ExportFailed", "message": "Export scope failed; previous current.json is unchanged" } }
+        "inputs": { "runStatus": "Failed", "runError": { "code": "ExportFailed", "message": "Export scope failed; inspect actions and stored current.json before retrying" } }
       }
     },
     "outputs": {}
