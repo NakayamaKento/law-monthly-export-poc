@@ -4,13 +4,15 @@
 
 すべて閉域接続できる端末内のブラウザーと Azure portal で操作します。ローカルコマンドや Cloud Shell は使いません。
 
+**実データなしで初めて試す場合は、[受入確認](validation.md) §2.1 のダミーデータによるテスト実行手順を使ってください。** ログ取り込み不要で、設定する KQL と操作・期待結果を一続きで確認できます。評価終了時は無効化し、通常運用へ自動的に移行しません。
+
 ## 1. 通常の月次処理
 
 - MONTH_OVERRIDE が空なら、実行開始時点の JST 前月を処理します。期間は **開始を含み、翌月開始を含まない**条件です。
-- 意図した定期実行は毎月 5 日 09:00 JST。設定変更後に初回実行・次回予定を確認し、実際の月次発火未観測と区別します。
+- 意図した定期実行は毎月 5 日 09:00 JST。[Recurrence の開始日時・タイムゾーンの仕様](https://learn.microsoft.com/en-us/azure/connectors/connectors-native-recurrence)に従い、設定変更後に初回実行・次回予定を確認し、実際の月次発火未観測と区別します。
 - データ遅延で 5 日時点の前月ログが完全になるとは保証しません。締め日、再抽出、保持期間は顧客で決定します。
 - このサンプルに自動失敗通知はありません。portal の実行履歴の状態・対象月・完了 run を管理者が確認します。
-- 自動排他は実装していません。手動実行・再実行を同時に行わず、定期実行予定と重ならない作業枠で操作してください。
+- トリガーの同時実行数は 1 ですが、この版の排他動作は実機未検証です。手動実行・再送を重ねず、定期実行予定と重ならない作業枠で操作してください。
 
 ## 2. 対象月を指定して手動実行する
 
@@ -27,7 +29,7 @@
 
 ## 3. CSV の取得と完了判定
 
-保存先は出力 Storage の **`exports` コンテナー**です。OUT_BLOB_URI にはコンテナー名を含めません。
+保存先はホストと共用する Storage の **`exports` コンテナー**です。OUT_BLOB_URI にはコンテナー名を含めません。ホスト内部のコンテナー・Queue / Table は閲覧・変更・削除しません。取得者のデータ権限は exports に限定します。
 
 ```text
 exports（コンテナー）
@@ -44,7 +46,7 @@ exports（コンテナー）
 4. その path の `manifest.json` と `export.csv` を取得する。更新日時が新しい別 run を勝手に採用しない。
 5. manifest の `month`、`runId`、`windowStartUtc`、`windowEndUtc`、`rowCount`、`files`、`completedAtUtc` を確認し、実行履歴と照合する。現実装の files は `["export.csv"]`。
 
-manifest の `rowCount` は JSON 数値ではなく文字列として保存される場合があるため、値を読み取って比較します。サイズ・ハッシュ・明示的な complete フラグは現実装にはありません。current が示す run と成功履歴の両方を確認します。
+manifest の `rowCount` は JSON 数値です。今回の実機でも数値として保存されることを確認しています。サイズ・ハッシュ・明示的な complete フラグは manifest にはありません。current が示す run と成功履歴の両方を確認します。
 
 - UTF-8 BOM 付き CSV。0 件は `TimeGenerated,Id,Text` など設定したヘッダーと改行のみ。
 - CSV の値に改行が入るため、単純なテキストの行数はレコード数ではありません。組織で認めた CSV 対応ソフトのインポート機能で確認します。
@@ -59,24 +61,28 @@ manifest の `rowCount` は JSON 数値ではなく文字列として保存さ�
 - クエリ・変換・アップロード途中で失敗した run は正式成果物として採用しない。通常、この段階の失敗では前回 current が残ります。
 - current 自体の更新で通信障害になった場合は、状態を推測せず current と実行履歴を再確認する。
 - 初回失敗時は current がまだ存在しない場合があります。「0 件」と読み替えない。
-- 同時実行すると最後に current を更新した run が採用され得ます。排他制御の実装前は同時実行を禁止します。
+- トリガー同時実行数 1 を維持し、手動実行を重ねません。別ワークフローを同じ出力先へ接続しても、この設定でアプリ間の排他にはなりません。
 - 過去 run / 失敗 run の自動削除はありません。承認済みの保持ルールに従い、current が参照する run を消さないよう管理者が削除します。
 
 | 症状 | portal で確認する点 / 対応 |
 |---|---|
 | ホストランタイムが ServiceUnavailable | 設定変更後の起動待ちか確認。続くならホスト MI、Storage の 4 ロール、PE、DNS、ネットワーク設定を確認して停止。キー接続文字列を追加しない |
-| クエリ 401 / 403 | システム割り当て MI、LAW の Log Analytics Reader、権限反映、AMPLS / 公開問い合わせ無効 / DNS を確認。認証 audience は `https://api.loganalytics.io` |
-| Blob 403 | 書き込みはアプリ MI の Storage Blob Data Contributor、取得は操作者の Data Reader と閉域経路を確認 |
+| クエリ / API 接続 401 / 403 | システム MI、LAW の Log Analytics Reader、API 接続のアクセスポリシー、MONITOR_* の 3 設定と connections.json の 2 段階の MI 認証を確認。LAW 公開クエリ、管理コネクタ実行時 URL への HTTPS 送信も確認。ホスト用ユーザー MI やユーザーログインへ切り替えない |
+| Blob 403 | 組み込み接続 AzureBlob のシステム MI、exports コンテナーの Storage Blob Data Contributor、取得者の同コンテナーの Data Reader、Blob PE / DNS を確認 |
+| Query の時間範囲エラー | デザイナーの Time Range Type と配布値 timerangetype `"3"` / timerange `{}` が「Set in query / クエリで設定」に対応することを確認。内部値を推測せず、別の相対期間で絞らない |
+| Query で Token not found | 管理サービス用 audience に加えて additionalAudiences の Log Analytics 用 `https://api.loganalytics.io` があることを確認。メタデータ取得の成功だけで MI 接続を正常と判断しない |
 | KQL 構文エラー | 失敗アクションを確認し、同じ LAW のログ画面で KQL を確認。`start` / `end` はワークフローが付加する変数。修正後、重複実行なしで再試験 |
 | SchemaMismatch | COLUMNS と KQL の project 順を照合。固定サンプルなら `TimeGenerated,Id,Text` |
 | RowCap | 500,000 行以上を検出。自動分割はないため停止し、別途分割設計を行う。上限を外して成功扱いにしない |
 | HTTP 200 だが error / PartialError | ワークフローは error を検出すると失敗にする。ただし実際の PartialError 再現は未検証。部分結果を正式出力にしない |
-| 本文なし・予期しない応答で 0 件 | 現実装の coalesce により空結果になり得る。スキーマの厳密検証は未実装。LAW の同条件クエリ・履歴を確認し、正しい 0 件と実証できなければ不合格 |
+| Rows の Parse JSON 失敗 | value 配列・bag 列の欠損、無応答や異常な応答型は失敗になる。0 件は value が明示的な空配列の場合だけ。履歴を確認し、空配列への置換でエラーを隠さない |
 | portal で作成 / 保存できない、再起動で定義が消える | WS1 のサポート確認・コンテンツ永続化ゲート未達として停止。管理 API や一時公開で穴埋めしない |
 
-HTTP の再試行は現実装では有限の固定間隔です（クエリ 3 回・30 秒、Blob 3 回・10 秒）。自動分割、指数バックオフ、通知連携を備えた本番運用基盤とは異なります。
+アクションの再試行は有限の固定間隔です（クエリ 3 回・30 秒、Blob 3 回・10 秒）。管理コネクタ自体の応答・時間制限は別に適用されます。自動分割、指数バックオフ、通知連携を備えた本番運用基盤とは異なります。
 
-実行履歴にはクエリ結果や CSV の本文が残り得ます。閲覧権限と保持を制限してください。Secure Inputs / Outputs や自動監視は別途設計・確認が必要です。ログ本文・ID・トークンを問い合わせ添付や公開資料へ転記しません。
+組み込み uploadBlob が設定する保存メタデータの Content-Type は、この検証では CSV / JSON とも `text/plain; charset=utf-8` でした。拡張子と本文で CSV / JSON として明示的に開きます。旧 HTTP 版の `text/csv` / `application/json` からの差異であり、MIME 型に依存する後続処理が必要なら別途設計します。本文の UTF-8 BOM・CSV エスケープ・JSON 形式とは別の属性です。
+
+実行履歴にはクエリ結果や CSV の本文が残り得ます。閲覧権限と保持を制限してください。[Secure Inputs / Outputs](https://learn.microsoft.com/en-us/azure/logic-apps/set-up-security-permissions#secure-data-in-run-history) や自動監視は別途設計・確認が必要です。ログ本文・ID・トークンを問い合わせ添付や公開資料へ転記しません。
 
 ## 5. 評価環境の後片付け
 
@@ -90,4 +96,16 @@ HTTP の再試行は現実装では有限の固定間隔です（クエリ 3 回
 6. 削除の完了を確認し、サブスクリプションの **すべてのリソース**で対象名を検索する。RG 外の診断設定・ネットワーク設定も再確認する。削除処理中・失敗・残存を「完了」と記録しない。
 7. 台帳に削除結果・残存有無・対応者を記録する。課金画面は反映が遅れるため、費用がすぐ 0 と表示されることを削除完了条件にしない。
 
+**既存 RG / 既存プランを再利用した場合は、手順 5 の RG 削除を実施しません。** 台帳で今回作成したものだけを個別に選択します。最後のアプリを削除すると、[Web Apps Delete の既定動作](https://learn.microsoft.com/en-us/rest/api/appservice/web-apps/delete?view=rest-appservice-2024-04-01)により空の App Service プランも連動削除され得ます。portal の削除確認で**関連プラン**を削除対象に含めず、既存プランの保持を明示できない場合は**削除を中止**してください。削除後はプラン自体を開き、事前に控えた名前・リージョン・SKU・設定が残ることを確認します。「プランを選択しなかった」だけでは保持の確認になりません。
+
 失敗した検証をやり直す場合も、この専用環境だけを削除・残存確認してから再設計します。既存本番環境や共有 DNS / 診断設定を巻き込まないでください。
+
+## 公開情報の参照先
+
+- [portal での Blob データへの Entra 認証と必要な権限](https://learn.microsoft.com/en-us/azure/storage/blobs/authorize-data-operations-portal)
+- [Azure Blob 組み込みの保存・読み取り操作](https://learn.microsoft.com/en-us/azure/logic-apps/connectors/built-in/reference/azureblob/)
+- [Monitor Logs 管理コネクタの認証・応答サイズ・件数・タイムアウト](https://learn.microsoft.com/en-us/azure/connectors/connectors-azure-monitor-logs)
+- [Standard の MI 接続 JSON と API 接続アクセスポリシー](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)
+- [Logic Apps の再試行・同時実行・実行履歴保持の制限と設定](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-limits-and-config)
+
+対象月の計算、出力パス、RowCap、再試行回数、current 更新規約、保存 MIME の実測値は本サンプル固有です。コネクタの公開仕様と区別してください。

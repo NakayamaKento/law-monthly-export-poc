@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "10067114199952228550"
+      "templateHash": "7660508663380335042"
     }
   },
   "parameters": {
@@ -55,6 +55,15 @@
           },
           "retentionInDays": {
             "value": "[parameters('retentionInDays')]"
+          },
+          "hostingMode": {
+            "value": "ws"
+          },
+          "privateLogAnalytics": {
+            "value": false
+          },
+          "separateOutputStorage": {
+            "value": false
           }
         },
         "template": {
@@ -64,7 +73,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "8303457029354385273"
+              "templateHash": "15530125741766271651"
             }
           },
           "parameters": {
@@ -83,34 +92,75 @@
             "retentionInDays": {
               "type": "int",
               "defaultValue": 30
+            },
+            "hostingMode": {
+              "type": "string",
+              "defaultValue": "ase",
+              "allowedValues": [
+                "ase",
+                "ws"
+              ]
+            },
+            "privateLogAnalytics": {
+              "type": "bool",
+              "defaultValue": true
+            },
+            "separateOutputStorage": {
+              "type": "bool",
+              "defaultValue": true
             }
           },
           "variables": {
             "vnetName": "[format('{0}-vnet', parameters('prefix'))]",
             "hostSaName": "[toLower(format('{0}h{1}', parameters('prefix'), parameters('uniq')))]",
-            "outSaName": "[toLower(format('{0}o{1}', parameters('prefix'), parameters('uniq')))]",
-            "zoneNames": [
+            "outSaName": "[if(parameters('separateOutputStorage'), toLower(format('{0}o{1}', parameters('prefix'), parameters('uniq'))), variables('hostSaName'))]",
+            "peSubnet": {
+              "name": "snet-pe",
+              "properties": {
+                "addressPrefix": "10.50.1.0/24"
+              }
+            },
+            "aseSubnets": [
+              {
+                "name": "snet-ase",
+                "properties": {
+                  "addressPrefix": "10.50.0.0/24",
+                  "delegations": [
+                    {
+                      "name": "ase",
+                      "properties": {
+                        "serviceName": "Microsoft.Web/hostingEnvironments"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "snet-vm",
+                "properties": {
+                  "addressPrefix": "10.50.2.0/24"
+                }
+              },
+              {
+                "name": "AzureBastionSubnet",
+                "properties": {
+                  "addressPrefix": "10.50.3.0/26"
+                }
+              }
+            ],
+            "commonZoneNames": [
               "[format('privatelink.blob.{0}', environment().suffixes.storage)]",
               "[format('privatelink.queue.{0}', environment().suffixes.storage)]",
-              "[format('privatelink.table.{0}', environment().suffixes.storage)]",
-              "[format('privatelink.file.{0}', environment().suffixes.storage)]",
+              "[format('privatelink.table.{0}', environment().suffixes.storage)]"
+            ],
+            "monitorZoneNames": [
               "privatelink.monitor.azure.com",
               "privatelink.oms.opinsights.azure.com",
               "privatelink.ods.opinsights.azure.com",
               "privatelink.agentsvc.azure-automation.net"
             ],
-            "hostGroups": [
-              "blob",
-              "queue",
-              "table",
-              "file"
-            ],
-            "hostZoneIdx": {
-              "blob": 0,
-              "queue": 1,
-              "table": 2,
-              "file": 3
-            },
+            "zoneNames": "[concat(variables('commonZoneNames'), if(parameters('privateLogAnalytics'), variables('monitorZoneNames'), createArray()), if(equals(parameters('hostingMode'), 'ase'), createArray(format('privatelink.file.{0}', environment().suffixes.storage)), createArray()))]",
+            "hostGroups": "[if(equals(parameters('hostingMode'), 'ase'), createArray('blob', 'queue', 'table', 'file'), createArray('blob', 'queue', 'table'))]",
             "roleIds": [
               "17d1049b-9a84-46fb-8f53-869881c3d3ab",
               "b7e6dc6d-f1e8-4753-8033-0f276bb0955b",
@@ -130,40 +180,7 @@
                     "10.50.0.0/16"
                   ]
                 },
-                "subnets": [
-                  {
-                    "name": "snet-ase",
-                    "properties": {
-                      "addressPrefix": "10.50.0.0/24",
-                      "delegations": [
-                        {
-                          "name": "ase",
-                          "properties": {
-                            "serviceName": "Microsoft.Web/hostingEnvironments"
-                          }
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "name": "snet-pe",
-                    "properties": {
-                      "addressPrefix": "10.50.1.0/24"
-                    }
-                  },
-                  {
-                    "name": "snet-vm",
-                    "properties": {
-                      "addressPrefix": "10.50.2.0/24"
-                    }
-                  },
-                  {
-                    "name": "AzureBastionSubnet",
-                    "properties": {
-                      "addressPrefix": "10.50.3.0/26"
-                    }
-                  }
-                ]
+                "subnets": "[if(equals(parameters('hostingMode'), 'ase'), concat(createArray(variables('peSubnet')), variables('aseSubnets')), createArray(variables('peSubnet')))]"
               }
             },
             {
@@ -225,6 +242,7 @@
               }
             },
             {
+              "condition": "[parameters('separateOutputStorage')]",
               "type": "Microsoft.Storage/storageAccounts",
               "apiVersion": "2023-05-01",
               "name": "[variables('outSaName')]",
@@ -251,6 +269,7 @@
               "apiVersion": "2023-05-01",
               "name": "[format('{0}/{1}', variables('outSaName'), 'default')]",
               "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('hostSaName'))]",
                 "[resourceId('Microsoft.Storage/storageAccounts', variables('outSaName'))]"
               ]
             },
@@ -308,17 +327,18 @@
                   {
                     "name": "z",
                     "properties": {
-                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[variables('hostZoneIdx')[variables('hostGroups')[copyIndex()]]])]"
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), format('privatelink.{0}.{1}', variables('hostGroups')[copyIndex()], environment().suffixes.storage))])]"
                     }
                   }
                 ]
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Network/privateEndpoints', format('{0}-{1}-pe', variables('hostSaName'), variables('hostGroups')[copyIndex()]))]",
-                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[variables('hostZoneIdx')[variables('hostGroups')[copyIndex()]]])]"
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), format('privatelink.{0}.{1}', variables('hostGroups')[copyIndex()], environment().suffixes.storage))])]"
               ]
             },
             {
+              "condition": "[parameters('separateOutputStorage')]",
               "type": "Microsoft.Network/privateEndpoints",
               "apiVersion": "2023-11-01",
               "name": "[format('{0}-blob-pe', variables('outSaName'))]",
@@ -345,6 +365,7 @@
               ]
             },
             {
+              "condition": "[parameters('separateOutputStorage')]",
               "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
               "apiVersion": "2023-11-01",
               "name": "[format('{0}/{1}', format('{0}-blob-pe', variables('outSaName')), 'default')]",
@@ -393,10 +414,11 @@
                 },
                 "retentionInDays": "[parameters('retentionInDays')]",
                 "publicNetworkAccessForIngestion": "Disabled",
-                "publicNetworkAccessForQuery": "Disabled"
+                "publicNetworkAccessForQuery": "[if(parameters('privateLogAnalytics'), 'Disabled', 'Enabled')]"
               }
             },
             {
+              "condition": "[parameters('privateLogAnalytics')]",
               "type": "microsoft.insights/privateLinkScopes",
               "apiVersion": "2021-07-01-preview",
               "name": "[format('{0}-ampls', parameters('prefix'))]",
@@ -409,6 +431,7 @@
               }
             },
             {
+              "condition": "[parameters('privateLogAnalytics')]",
               "type": "Microsoft.Insights/privateLinkScopes/scopedResources",
               "apiVersion": "2021-07-01-preview",
               "name": "[format('{0}/{1}', format('{0}-ampls', parameters('prefix')), 'law')]",
@@ -421,6 +444,7 @@
               ]
             },
             {
+              "condition": "[parameters('privateLogAnalytics')]",
               "type": "Microsoft.Network/privateEndpoints",
               "apiVersion": "2023-11-01",
               "name": "[format('{0}-ampls-pe', parameters('prefix'))]",
@@ -448,6 +472,7 @@
               ]
             },
             {
+              "condition": "[parameters('privateLogAnalytics')]",
               "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
               "apiVersion": "2023-11-01",
               "name": "[format('{0}/{1}', format('{0}-ampls-pe', parameters('prefix')), 'default')]",
@@ -456,25 +481,25 @@
                   {
                     "name": "monitor",
                     "properties": {
-                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[4])]"
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), 'privatelink.monitor.azure.com')])]"
                     }
                   },
                   {
                     "name": "oms",
                     "properties": {
-                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[5])]"
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), 'privatelink.oms.opinsights.azure.com')])]"
                     }
                   },
                   {
                     "name": "ods",
                     "properties": {
-                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[6])]"
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), 'privatelink.ods.opinsights.azure.com')])]"
                     }
                   },
                   {
                     "name": "agentsvc",
                     "properties": {
-                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[7])]"
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), 'privatelink.agentsvc.azure-automation.net')])]"
                     }
                   },
                   {
@@ -487,11 +512,11 @@
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Network/privateEndpoints', format('{0}-ampls-pe', parameters('prefix')))]",
-                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[5])]",
-                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[4])]",
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), 'privatelink.oms.opinsights.azure.com')])]",
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), 'privatelink.ods.opinsights.azure.com')])]",
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), 'privatelink.monitor.azure.com')])]",
                 "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[0])]",
-                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[6])]",
-                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[7])]"
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('zoneNames')[indexOf(variables('zoneNames'), 'privatelink.agentsvc.azure-automation.net')])]"
               ]
             }
           ],
@@ -545,6 +570,10 @@
     "lawName": {
       "type": "string",
       "value": "[format('{0}-law', parameters('prefix'))]"
+    },
+    "lawResourceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-base', deployment().name)), '2025-04-01').outputs.lawId.value]"
     },
     "lawCustomerId": {
       "type": "string",

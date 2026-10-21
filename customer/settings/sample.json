@@ -1,12 +1,27 @@
 [
   {
-    "name": "LAW_ID",
-    "value": "<LOG_ANALYTICS_WORKSPACE_ID>",
+    "name": "LAW_RESOURCE_ID",
+    "value": "<LOG_ANALYTICS_WORKSPACE_RESOURCE_ID>",
     "slotSetting": false
   },
   {
     "name": "OUT_BLOB_URI",
     "value": "https://<OUTPUT_STORAGE_ACCOUNT_NAME>.blob.core.windows.net",
+    "slotSetting": false
+  },
+  {
+    "name": "MONITOR_API_ID",
+    "value": "<MONITOR_API_ID>",
+    "slotSetting": false
+  },
+  {
+    "name": "MONITOR_CONNECTION_ID",
+    "value": "<MONITOR_CONNECTION_ID>",
+    "slotSetting": false
+  },
+  {
+    "name": "MONITOR_CONNECTION_RUNTIME_URL",
+    "value": "<MONITOR_CONNECTION_RUNTIME_URL>",
     "slotSetting": false
   },
   {
