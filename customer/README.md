@@ -4,11 +4,11 @@ Logic Apps **Consumption（従量課金）**で前月のログを日本時間の
 
 ## 評価前に確認してください
 
-**Consumption 版の Azure 実機受入は未実施です。** 配布物の静的検証と、旧 Standard 版の実行結果は区別します。本番対応済み・portal 完結実証済みとは説明しません。
+**2026-10-22 に Consumption の実環境を portal から構築し、ダミー 4 / 0 / 1 件の CSV 保存・実行内読み戻しを確認しました。** 同月再実行と列不一致・不正 KQL も確認しています。ただし、操作者による独立したファイル取得・削除・実月次発火・本番量は未検証です。[受入結果と残項目](docs/validation.md)を参照し、本番対応済み・取得や削除まで portal 完結実証済みとは説明しません。
 
 Storage は初回から **Public network access: Disabled**、既定拒否、**信頼された Azure サービスの例外: 有効**にします。Private Endpoint による通信ではなく、対応サービスに公開エンドポイントの例外を許可する設計です。データ認可には別途 MI の RBAC が必要です。
 
-[Blob の公式手順](https://learn.microsoft.com/en-us/azure/connectors/connectors-create-api-azureblobstorage#access-blob-storage-in-same-region-with-system-managed-identities)は Consumption＋システム MI の方法を案内していますが、「選択したネットワークから有効」の例です。[Storage の注意事項](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-limitations)は Disabled 変更後も既存例外が有効と説明しています。**初回から Disabled の本構成で保存・読み戻しできるかを評価する必要があります。失敗した場合は停止し、一時的な Public 有効化やキー認証で回避しません。**
+[Blob の公式手順](https://learn.microsoft.com/en-us/azure/connectors/connectors-create-api-azureblobstorage#access-blob-storage-in-same-region-with-system-managed-identities)は Consumption＋システム MI の方法を案内していますが、「選択したネットワークから有効」の例です。[Storage の注意事項](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-limitations)は Disabled 変更後も既存例外が有効と説明しています。**今回の評価環境では初回から Disabled で保存・読み戻しに成功しました。導入先ごとに同じ接続ゲートを確認し、失敗した場合は停止します。一時的な Public 有効化やキー認証で回避しません。**
 
 ## 読む順序・同梱物
 

@@ -5,7 +5,7 @@ Logic Apps **Consumption** の月次 Recurrence で前月のログを取得し�
 - Monitor Logs / Blob は**管理コネクタ＋システム割り当て MI**。
 - 期間計算・応答検証・CSV 変換は組み込みアクション。REST API の直書き、キー、SAS、ユーザーの接続資格情報なし。
 - Storage は初回から **Disabled / Deny / AzureServices**、Shared Key・匿名アクセス無効。例外接続は Private Endpoint 通信ではありません。
-- **Consumption 版の Azure 実機受入は未実施**。初回から Disabled での接続、portal 完結、CSV ファイル取得、本番量は未検証です。旧 WS1 の実績を流用しません。
+- **2026-10-22 に Consumption の実構築・4 / 0 / 1 件の保存と実行内読み戻しを確認**。初回から Disabled / keyless のまま成功しました。独立した CSV 取得・削除・実月次・本番量は未検証です。旧 WS1 の実績を流用しません。
 
 ## 顧客向け提供
 
@@ -25,7 +25,7 @@ Logic Apps **Consumption** の月次 Recurrence で前月のログを取得し�
 | [scripts/](scripts/) | 再生成・静的検証。顧客の操作手順には含めない |
 | [保守手順](docs/customer-maintenance.md) | 正本・生成物・変更時の検証 |
 | [コンテキスト](docs/CONTEXT.md) | 現在の要件・判断・未検証点 |
-| [設計・検証記録](docs/plan.md) | §22 が今回の切替。§1～§21 は過去の計画・実績 |
+| [設計・検証記録](docs/plan.md) | §22 が Consumption 切替、§23 が portal 実構築・検証。§1～§21 は過去の計画・実績 |
 
 旧 ASE / WS1 用の実行資材は現行経路から除去しました。過去の削除事故を含む記録は保持しますが、過去版の実機成功は Consumption の動作証明ではありません。
 
@@ -38,4 +38,4 @@ Logic Apps **Consumption** の月次 Recurrence で前月のログを取得し�
 - [Consumption の MI 対応コネクタと V1 接続](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)
 - [Monitor Logs の制限](https://learn.microsoft.com/en-us/azure/connectors/connectors-azure-monitor-logs)
 
-公開資料の接続例は「選択したネットワークから有効」です。**初回から Disabled の本構成が動くかは別途評価し、失敗時に Public やキーを有効化しません。**
+公開資料の接続例は「選択したネットワークから有効」です。**今回の評価環境では初回から Disabled の接続に成功しましたが、導入先ごとに再確認し、失敗時に Public やキーを有効化しません。**
