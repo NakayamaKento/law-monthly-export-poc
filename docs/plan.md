@@ -628,3 +628,51 @@ RG は承認された配置先を使う。システム MI は Logic App に付�
 ユーザー指定の rubber-duck エージェントで、全変更と顧客手順を読み取りレビューした。**ブロッキング指摘はなし**。V1 の multi-auth MI 接続、`$connections`、既存ワークフローからの principal 参照、初期無効、動的スキーマ、Select、BOM と保存バイト比較、月次開始日時の整合を確認した。
 
 非ブロッキングの注意は、オフライン CSV 列順の実サービス再現性と、入力例に含むプレースホルダーの扱いの 2 点。列順の違いは Check_Header で失敗し得ることを受入・障害対応へ補足し、`<...>` を未置換で投入しない注意は維持した。実機受入・取得経路の未確認は引き続き明記する。
+
+## 23. Playwright による顧客手順の実構築・トレース（2026-10-22）
+
+ユーザーから、顧客手順を Playwright でトレースし、スクリーンショット付き作業ログを残す指示を受けた。対象はコミット `0e14ff0` の Consumption 版。Azure portal を統合ブラウザーで開き、Playwright のスクリーンショットを実ファイルへ保存した。
+
+### 再開・承認と実構築
+
+当初はブラウザーの認証待ちで中断した。その後ユーザー本人がサインインを完了し、「実際に環境構築してね」と指示したため、提示済みの専用 RG / Southeast Asia / 最小 Consumption 構成を実構築した。削除は承認されていないため、終了時は無効状態で保持する。
+
+- 専用 RG を新規作成し、配布する基盤 → ワークフロー・接続 → 限定 RBAC の3段階 ARM を portal の全文貼付・確認と作成から投入。全段階でデプロイ完了を確認した。
+- Storage の実 portal JSON は Public Disabled / Deny / AzureServices、Shared Key false、匿名 false、HTTPS / TLS1_2、IP / VNet 許可なし。初回からこの設定で、一時公開・キー・制限解除タグを使用していない。
+- LAW は公開クエリ有効・公開取り込み無効・保持90日。workflow は初期 Disabled、SystemAssigned、将来 startTime / JST / 同時実行1。LAW IAM で今回 MI の閲覧者ロールとリソーススコープを確認した。
+- App Service / WS1、ホスト Storage、VNet / PE / DNS、VM は作成せず、既存 RG・復旧した旧 WS1 を変更していない。
+
+提供者側では静的テスト・生成一致と各段階の CLI preflight（build / validate / what-if）も別途実施した。全段階 PASS、Modify / Delete は0。ただし、これは顧客 UI 手順の実証には数えない。**実リソースの作成、定義変更、手動実行はすべて Playwright の portal UI 操作**であり、CLI / REST による代替投入はしていない。
+
+### 実行と保存済み CSV
+
+| ケース | 実結果 | 保存内容の確認 |
+|---|---|---|
+| 2026-01 | Succeeded / 7.96秒 | 4件、Id2/3/4/5、233バイト |
+| 2025-11 | Succeeded / 3.58秒 | 0件、26バイト、BOM＋ヘッダー＋CRLF |
+| 2026-02 | Succeeded / 2.65秒 | Id6の1件、75バイト、翌月開始境界を含む |
+| 2026-01再実行 | Succeeded / 2.51秒 | 別run、初回CSV本文と全バイト一致。同月currentの置換書込成功 |
+| 列不一致 | Failed / 2.26秒 | Check_Record_Columns が ValidationFailed、Upload_Current は Skipped |
+| 不正KQL | Failed / 1.89秒 | Query が HTTP400 / SyntaxError、Upload_Current は Skipped |
+
+成功した実行では Upload_CSV → Read_Back_CSV → 不一致チェック → manifest / current の順を確認した。Manifest 出力の対象月・UTC窓・数値 rowCount・`csvReadBackVerified=true` と読み戻した本文を照合。UTF-8 BOM、列順、日本語、カンマ、引用符、埋込改行を提供者側で検査した。1月初回・再実行の本文 SHA256 は `63D0F75B814DB2DF09BAB7992BBCBB8833F5F517FC35E3654A4AB43BDDC1D3A6`。
+
+この CSV は**保存済み Blob を取得した実行内アクションの出力**から復元した証拠であり、Storage ブラウザーからの独立ダウンロードではない。保存済み current → manifest → CSV、旧 run、異常系後の current の独立再取得は未実施。更新アクションの Skipped だけを「保存済み current 不変の独立照合」と説明しない。
+
+### 手順との差異・学び
+
+- ARM エディターの「ファイルの読み込み」が portal 側のエラーとなったため、手順どおり全文貼付で完了した。空の既定テンプレートのまま進めない。
+- shell は日本語でも Consumption 概要のコマンドは Enable / Disable / Run / Refresh。実行は Run のメニュー内で改めて Run を選び、トリガー受付通知ではなく履歴の最終状態を確認する。
+- 新しいコードビューは Draft 自動保存と Publish が別。外側 `parameters.<名前>.value` を変更して Publish し、実行結果で反映を確認した。有効状態は保存前後に再確認する。
+- Playwright では非表示で残った同名 iframe と描画待ちに注意する。出力の初期 `{}` やクリップボードの別内容を検証値として採用せず、表示済みの対象を再取得・検査した。Query のデザイナー選択肢表示は確認できておらず、実行入力の内部値 `"3"` の確認と区別する。
+- 顧客手順に、概要からの実行、Publish、出力の読込待ち、保存と独立取得の判定を反映した。
+
+### 終了状態・残項目・証拠
+
+元のダミー設定へ復元し、最後の portal リソース JSON で **Disabled / Succeeded** を確認した。試験前と全パラメーター・型・アクション・Recurrence が一致。実行履歴は成功4件・意図した失敗2件で Running はない。環境は保持し、自動運用へ移行しない。
+
+接続リソース個別の実 JSON、exports IAM の直接表示、Query の選択肢表示、公開クライアント拒否の切り分け、独立取得、実月次・競合・権限不足・通信障害・本番量・削除は未実施。[顧客受入表](../customer/docs/validation.md)に確認済みと残項目を分けて記載した。
+
+スクリーンショット36枚、実デプロイ・実行ID、portalからコピーした実状態、読み戻しCSV、詳細作業ログは私有のセッション保存先へ保全した。生画像・実ID・ユーザー名はコミットしない。認証操作中の撮影や、署名URL・Cookie・トークンのログ転載はしない。
+
+提供者側の終了時チェックは、静的・オフライン・資料リンクの13/13成功、実JSONの復元一致、CSVのバイト照合、36枚の画像と作業ログの証拠リンクの実在確認。preflightの一時生成ARMが最初のテストに混入したため今回生成分だけを除去して再実行した。作業用の計画・検証ステータス・パラメーターファイルも整理し、実リソースの削除とは区別した。

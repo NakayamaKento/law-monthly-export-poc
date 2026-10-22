@@ -4,7 +4,7 @@
 
 Azure Log Analytics の前月ログを毎月 5 日 09:00 JST に抽出し、CSV として Storage に保存する。2026-10-22 の指示により、**顧客向け資料を含む現行資材を Logic Apps Consumption に統一**した。過去の ASE / WS1 は現行の採用構成ではない。
 
-顧客向け入口は [customer/README.md](../customer/README.md)、生成・テストは [customer-maintenance.md](customer-maintenance.md)。[plan.md](plan.md) §22 が今回の切替、§1～§21 は過去の計画・検証・再検討の履歴である。
+顧客向け入口は [customer/README.md](../customer/README.md)、生成・テストは [customer-maintenance.md](customer-maintenance.md)。[plan.md](plan.md) §22 が今回の切替、§23 が portal 実構築と検証。§1～§21 は過去の計画・検証・再検討の履歴である。
 
 ## 要件と制約
 
@@ -35,11 +35,19 @@ Consumption の Blob は**管理コネクタ**。期間計算・CSV・条件・P
 ## 公開根拠と未検証点
 
 - [Blob の Consumption＋システム MI](https://learn.microsoft.com/en-us/azure/connectors/connectors-create-api-azureblobstorage#access-blob-storage-in-same-region-with-system-managed-identities)は信頼されたサービス例外を案内する。ユーザー割り当て MI をこの方式に使わない。
-- [Storage の注意事項](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-limitations)は Disabled 後も既存例外が有効と説明するが、公式の Blob 手順は「選択したネットワークから有効」を例示する。**初回から Disabled の接続は未実証**で、最優先の実機ゲート。
-- [MI 対応コネクタと V1 接続](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)に従う。実際の portal 作成・編集保存・接続認可は未実施。
+- [Storage の注意事項](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-limitations)は Disabled 後も既存例外が有効と説明するが、公式の Blob 手順は「選択したネットワークから有効」を例示する。**2026-10-22 の新規 Consumption 環境では初回から Disabled / keyless の保存・実行内読み戻しに成功**した。導入先ごとに同じ接続ゲートを確認する。
+- [MI 対応コネクタと V1 接続](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)に従う。portal の3段階投入、定義の Publish、ダミー設定変更・復元と実接続を確認した。接続リソースの個別 JSON、Query の選択肢表示の照合は未確認。
 - [Monitor Logs](https://learn.microsoft.com/en-us/azure/connectors/connectors-azure-monitor-logs)の上限は約 16 MiB、500,000 行、100 秒 / 110 秒。Basic / Auxiliary 非対応。自動分割は未実装。
 - [Storage の portal 認可](https://learn.microsoft.com/en-us/azure/storage/blobs/authorize-data-operations-portal)とネットワーク制限は別。操作者は Logic App の例外を使えない。実行履歴で本文を見ることと、保存済み CSV ファイルの取得成功を同一視しない。
 - 実月次発火、本番量、PartialError 実発生、再送を含む排他、独立読み戻し・実ファイル取得、履歴機密性は未検証。現在の [受入確認](../customer/docs/validation.md)に結果を蓄積する。
+
+## Consumption 実機結果（2026-10-22）
+
+- Playwright で専用 RG と3段階 ARMを実投入。Storage / LAW / workflow の portal JSON を私有保全し、LAW IAM も確認した。実構築・編集・手動実行を CLI / REST で代替していない。
+- ダミー4 / 0 / 1件と1月再実行が Succeeded。保存済み Blob の Read_Back_CSV と不一致チェックを通過。BOM・特殊文字・列順・月境界と233 / 26 / 75バイトを提供者側で検査した。再実行のCSV本文は初回と全バイト一致し、同月current書き込みも成功。
+- 列不一致は Check_Record_Columns の ValidationFailed、不正KQLは Query の HTTP400 / SyntaxError。どちらも Failed で Upload_Current は Skipped。保存済み current の独立再取得は未実施であり、不変を実データ照合済みとはしない。
+- 元のパラメーター・型・アクション・Recurrenceへ復元。最後に portal JSONで Disabled / Succeeded を確認。削除は未承認のため保持し、旧RG・WS1は未変更。
+- スクリーンショット36枚と詳細作業ログは私有保存。実ID・ユーザー名・生画像をコミットしない。
 
 ## 過去実績との区別
 
@@ -49,7 +57,7 @@ Consumption の Blob は**管理コネクタ**。期間計算・CSV・条件・P
 
 ## 次の受入
 
-1. 承認後に、専用環境を初回から Disabled / keyless で作成し接続ゲートを確認。
-2. Consumption でダミー 4 / 0 / 1 件、再実行、異常系、保存済み Blob 独立照合。
-3. portal 完結と承認済み CSV 取得経路を実証。本番量・監視・保持を確定。
-4. 専用環境と RG 外の今回作成分を削除・残存確認する。
+1. 承認済み CSV 取得経路を確定し、保存済み current → manifest → CSV と旧 run を独立照合する。
+2. exports IAM 画面、接続の個別 JSON、Query の選択肢表示、正しいデータ権限を持つ公開クライアントの拒否を確認する。
+3. 本番量・実月次・競合と再送・権限不足・通信障害、監視・保持・履歴機密性を確認する。
+4. 削除承認を得てから専用環境と RG 外の今回作成分を削除・残存確認する。
