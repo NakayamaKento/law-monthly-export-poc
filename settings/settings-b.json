@@ -1,4 +1,0 @@
-[
-  { "name": "COLUMNS", "value": "TimeGenerated,OperationNameValue,ActivityStatusValue,CategoryValue", "slotSetting": false },
-  { "name": "KQL_BODY", "value": "AzureActivity | where TimeGenerated >= start and TimeGenerated < end | project TimeGenerated, OperationNameValue, ActivityStatusValue, CategoryValue | project bag=pack_all()", "slotSetting": false }
-]

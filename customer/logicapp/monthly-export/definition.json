@@ -1,6 +1,28 @@
 {
   "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
   "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$connections": {
+      "type": "Object",
+      "defaultValue": {}
+    },
+    "COLUMNS": {
+      "type": "Array"
+    },
+    "KQL_BODY": {
+      "type": "String"
+    },
+    "MONTH_OVERRIDE": {
+      "type": "String",
+      "defaultValue": ""
+    },
+    "LAW_RESOURCE_ID": {
+      "type": "String"
+    },
+    "STORAGE_ACCOUNT_NAME": {
+      "type": "String"
+    }
+  },
   "triggers": {
     "Monthly_JST_5th_0900": {
       "type": "Recurrence",
@@ -8,17 +30,7 @@
         "frequency": "Month",
         "interval": 1,
         "timeZone": "Tokyo Standard Time",
-        "schedule": {
-          "monthDays": [
-            5
-          ],
-          "hours": [
-            9
-          ],
-          "minutes": [
-            0
-          ]
-        }
+        "startTime": "2026-12-05T09:00:00"
       },
       "runtimeConfiguration": {
         "concurrency": {
@@ -35,7 +47,7 @@
         "Settings_Columns": {
           "type": "Compose",
           "runAfter": {},
-          "inputs": "@split(appsetting('COLUMNS'), ',')"
+          "inputs": "@parameters('COLUMNS')"
         },
         "Settings_KqlBody": {
           "type": "Compose",
@@ -44,16 +56,63 @@
               "Succeeded"
             ]
           },
-          "inputs": "@appsetting('KQL_BODY')"
+          "inputs": "@parameters('KQL_BODY')"
         },
-        "StartJst": {
-          "type": "Compose",
+        "Check_Settings": {
+          "type": "If",
           "runAfter": {
             "Settings_KqlBody": [
               "Succeeded"
             ]
           },
-          "inputs": "@if(empty(appsetting('MONTH_OVERRIDE')), addToTime(formatDateTime(convertTimeZone(utcNow(),'UTC','Tokyo Standard Time'),'yyyy-MM-01T00:00:00'),-1,'Month','yyyy-MM-ddTHH:mm:ss'), concat(appsetting('MONTH_OVERRIDE'),'-01T00:00:00'))"
+          "expression": {
+            "or": [
+              {
+                "equals": [
+                  "@empty(outputs('Settings_Columns'))",
+                  true
+                ]
+              },
+              {
+                "equals": [
+                  "@empty(trim(outputs('Settings_KqlBody')))",
+                  true
+                ]
+              },
+              {
+                "not": {
+                  "equals": [
+                    "@length(union(outputs('Settings_Columns'),outputs('Settings_Columns')))",
+                    "@length(outputs('Settings_Columns'))"
+                  ]
+                }
+              }
+            ]
+          },
+          "actions": {
+            "Terminate_Settings": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "InvalidSettings",
+                  "message": "KQL_BODY and unique COLUMNS are required"
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          }
+        },
+        "StartJst": {
+          "type": "Compose",
+          "runAfter": {
+            "Check_Settings": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@if(empty(parameters('MONTH_OVERRIDE')), addToTime(formatDateTime(convertTimeZone(utcNow(),'UTC','Tokyo Standard Time'),'yyyy-MM-01T00:00:00'),-1,'Month','yyyy-MM-ddTHH:mm:ss'), concat(parameters('MONTH_OVERRIDE'),'-01T00:00:00'))"
         },
         "EndJst": {
           "type": "Compose",
@@ -110,16 +169,16 @@
           "inputs": {
             "host": {
               "connection": {
-                "referenceName": "azuremonitorlogs"
+                "name": "@parameters('$connections')['azuremonitorlogs']['connectionId']"
               }
             },
             "method": "post",
             "path": "/queryDataV2",
             "queries": {
-              "subscriptions": "@split(appsetting('LAW_RESOURCE_ID'), '/')[2]",
-              "resourcegroups": "@split(appsetting('LAW_RESOURCE_ID'), '/')[4]",
+              "subscriptions": "@split(parameters('LAW_RESOURCE_ID'), '/')[2]",
+              "resourcegroups": "@split(parameters('LAW_RESOURCE_ID'), '/')[4]",
               "resourcetype": "Log Analytics Workspace",
-              "resourcename": "@split(appsetting('LAW_RESOURCE_ID'), '/')[8]"
+              "resourcename": "@split(parameters('LAW_RESOURCE_ID'), '/')[8]"
             },
             "body": {
               "query": "@outputs('QueryText')",
@@ -189,7 +248,15 @@
                     "type": "object",
                     "required": [
                       "bag"
-                    ]
+                    ],
+                    "properties": {
+                      "bag": {
+                        "type": [
+                          "object",
+                          "string"
+                        ]
+                      }
+                    }
                   }
                 }
               }
@@ -250,10 +317,28 @@
             "select": "@json(string(item()['bag']))"
           }
         },
+        "Check_Record_Columns": {
+          "type": "ParseJson",
+          "runAfter": {
+            "Records": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "content": "@body('Records')",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": "@outputs('Settings_Columns')"
+              }
+            }
+          }
+        },
         "Create_CSV_table": {
           "type": "Table",
           "runAfter": {
-            "Records": [
+            "Check_Record_Columns": [
               "Succeeded"
             ]
           },
@@ -307,35 +392,110 @@
           }
         },
         "Upload_CSV": {
-          "type": "ServiceProvider",
+          "type": "ApiConnection",
           "runAfter": {
             "Check_Header": [
               "Succeeded"
             ]
           },
           "inputs": {
-            "serviceProviderConfiguration": {
-              "connectionName": "AzureBlob",
-              "operationId": "uploadBlob",
-              "serviceProviderId": "/serviceProviders/AzureBlob"
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['azureblob']['connectionId']"
+              }
             },
-            "parameters": {
-              "containerName": "exports",
-              "blobName": "@{outputs('Month')}/runs/@{workflow().run.name}/export.csv",
-              "content": "@concat(uriComponentToString('%EF%BB%BF'), outputs('CsvText'))",
-              "overrideIfExists": "true"
+            "method": "post",
+            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('STORAGE_ACCOUNT_NAME')))}/files",
+            "headers": {
+              "Content-Type": "text/csv; charset=utf-8",
+              "ReadFileMetadataFromServer": true
+            },
+            "queries": {
+              "folderPath": "/exports/@{outputs('Month')}/runs/@{workflow().run.name}",
+              "name": "export.csv",
+              "queryParametersSingleEncoded": true
+            },
+            "body": "@concat(uriComponentToString('%EF%BB%BF'), outputs('CsvText'))",
+            "retryPolicy": {
+              "type": "fixed",
+              "count": 3,
+              "interval": "PT10S"
+            }
+          },
+          "description": "CreateFile_V2 replaces a same-name blob. Retries write the identical payload to this run-specific path."
+        },
+        "Read_Back_CSV": {
+          "type": "ApiConnection",
+          "runAfter": {
+            "Upload_CSV": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['azureblob']['connectionId']"
+              }
+            },
+            "method": "get",
+            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('STORAGE_ACCOUNT_NAME')))}/files/@{encodeURIComponent(encodeURIComponent(body('Upload_CSV')['Id']))}/content",
+            "queries": {
+              "inferContentType": false
             },
             "retryPolicy": {
               "type": "fixed",
               "count": 3,
               "interval": "PT10S"
             }
-          }
+          },
+          "description": "GetFileContent_V2 reads the saved bytes as a binary content envelope, not inferred text."
+        },
+        "Check_Read_Back_CSV": {
+          "type": "If",
+          "runAfter": {
+            "Read_Back_CSV": [
+              "Succeeded"
+            ]
+          },
+          "expression": {
+            "or": [
+              {
+                "equals": [
+                  "@empty(body('Read_Back_CSV')?['$content'])",
+                  true
+                ]
+              },
+              {
+                "not": {
+                  "equals": [
+                    "@body('Read_Back_CSV')?['$content']",
+                    "@base64(concat(uriComponentToString('%EF%BB%BF'),outputs('CsvText')))"
+                  ]
+                }
+              }
+            ]
+          },
+          "actions": {
+            "Terminate_Read_Back_Mismatch": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "ReadBackMismatch",
+                  "message": "Saved CSV binary envelope is missing or bytes differ, including UTF-8 BOM; current was not published"
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          },
+          "description": "Compare base64 bytes exactly, avoiding text decoding, newline normalization or BOM stripping."
         },
         "Manifest": {
           "type": "Compose",
           "runAfter": {
-            "Upload_CSV": [
+            "Check_Read_Back_CSV": [
               "Succeeded"
             ]
           },
@@ -348,34 +508,42 @@
             "files": [
               "export.csv"
             ],
+            "csvReadBackVerified": true,
             "completedAtUtc": "@{utcNow()}"
           }
         },
         "Upload_Manifest": {
-          "type": "ServiceProvider",
+          "type": "ApiConnection",
           "runAfter": {
             "Manifest": [
               "Succeeded"
             ]
           },
           "inputs": {
-            "serviceProviderConfiguration": {
-              "connectionName": "AzureBlob",
-              "operationId": "uploadBlob",
-              "serviceProviderId": "/serviceProviders/AzureBlob"
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['azureblob']['connectionId']"
+              }
             },
-            "parameters": {
-              "containerName": "exports",
-              "blobName": "@{outputs('Month')}/runs/@{workflow().run.name}/manifest.json",
-              "content": "@string(outputs('Manifest'))",
-              "overrideIfExists": "true"
+            "method": "post",
+            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('STORAGE_ACCOUNT_NAME')))}/files",
+            "headers": {
+              "Content-Type": "application/json; charset=utf-8",
+              "ReadFileMetadataFromServer": true
             },
+            "queries": {
+              "folderPath": "/exports/@{outputs('Month')}/runs/@{workflow().run.name}",
+              "name": "manifest.json",
+              "queryParametersSingleEncoded": true
+            },
+            "body": "@string(outputs('Manifest'))",
             "retryPolicy": {
               "type": "fixed",
               "count": 3,
               "interval": "PT10S"
             }
-          }
+          },
+          "description": "CreateFile_V2 replaces only this run's manifest on retry; earlier runs are retained."
         },
         "Current": {
           "type": "Compose",
@@ -390,30 +558,37 @@
           }
         },
         "Upload_Current": {
-          "type": "ServiceProvider",
+          "type": "ApiConnection",
           "runAfter": {
             "Current": [
               "Succeeded"
             ]
           },
           "inputs": {
-            "serviceProviderConfiguration": {
-              "connectionName": "AzureBlob",
-              "operationId": "uploadBlob",
-              "serviceProviderId": "/serviceProviders/AzureBlob"
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['azureblob']['connectionId']"
+              }
             },
-            "parameters": {
-              "containerName": "exports",
-              "blobName": "@{outputs('Month')}/current.json",
-              "content": "@string(outputs('Current'))",
-              "overrideIfExists": "true"
+            "method": "post",
+            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('STORAGE_ACCOUNT_NAME')))}/files",
+            "headers": {
+              "Content-Type": "application/json; charset=utf-8",
+              "ReadFileMetadataFromServer": true
             },
+            "queries": {
+              "folderPath": "/exports/@{outputs('Month')}",
+              "name": "current.json",
+              "queryParametersSingleEncoded": true
+            },
+            "body": "@string(outputs('Current'))",
             "retryPolicy": {
               "type": "fixed",
               "count": 3,
               "interval": "PT10S"
             }
-          }
+          },
+          "description": "CreateFile_V2 creates or replaces current.json last. Retries use the same pointer. A lost response can report failure after publication; inspect current before retrying."
         }
       }
     },

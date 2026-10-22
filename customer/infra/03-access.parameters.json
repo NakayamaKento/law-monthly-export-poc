@@ -2,10 +2,14 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "location": { "value": "southeastasia" },
-    "vnetName": { "value": "<FOUNDATION_OUTPUT_VNET_NAME>" },
-    "appName": { "value": "<APP_OUTPUT_APP_NAME>" },
-    "outSaName": { "value": "<FOUNDATION_OUTPUT_OUTPUT_STORAGE_NAME>" },
-    "lawName": { "value": "<FOUNDATION_OUTPUT_LAW_NAME>" }
+    "workflowName": {
+      "value": "lawexp-monthly"
+    },
+    "storageAccountName": {
+      "value": "<STORAGE_ACCOUNT_NAME>"
+    },
+    "lawName": {
+      "value": "<LAW_NAME>"
+    }
   }
 }

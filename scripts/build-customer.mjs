@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
@@ -23,23 +23,53 @@ function emitJson(relativePath, value) {
   emit(relativePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-for (const stage of ['01-foundation', '02-app-ws', '03-access']) {
+const sample = JSON.parse(readFileSync(resolve(root, 'settings', 'sample.json'), 'utf8'));
+const stages = {
+  '01-foundation': {
+    location: 'southeastasia',
+    prefix: 'lawexp',
+    retentionInDays: 90,
+  },
+  '02-workflow': {
+    location: 'southeastasia',
+    workflowName: 'lawexp-monthly',
+    storageAccountName: '<STORAGE_ACCOUNT_NAME>',
+    lawName: '<LAW_NAME>',
+    startTime: '2026-12-05T09:00:00',
+    columns: sample.COLUMNS.value,
+    kqlBody: sample.KQL_BODY.value,
+    monthOverride: sample.MONTH_OVERRIDE.value,
+  },
+  '03-access': {
+    workflowName: 'lawexp-monthly',
+    storageAccountName: '<STORAGE_ACCOUNT_NAME>',
+    lawName: '<LAW_NAME>',
+  },
+};
+
+for (const [stage, parameters] of Object.entries(stages)) {
   const compiled = execFileSync('bicep', [
     'build', resolve(root, 'infra', 'customer', `${stage}.bicep`), '--stdout',
   ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
   emitJson(`customer/infra/${stage}.json`, JSON.parse(compiled));
+  emitJson(`customer/infra/${stage}.parameters.json`, {
+    $schema: 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#',
+    contentVersion: '1.0.0.0',
+    parameters: Object.fromEntries(Object.entries(parameters).map(([name, value]) => [name, { value }])),
+  });
 }
 
 for (const [source, destination] of [
-  ['logicapp/host.json', 'customer/logicapp/host.json'],
-  ['logicapp/connections.json', 'customer/logicapp/connections.json'],
-  ['logicapp/monthly-export/workflow.json', 'customer/logicapp/monthly-export/workflow.json'],
-  ['settings/settings.json', 'customer/settings/sample.json'],
-  ['settings/settings.json', 'settings/settings-ws.json'],
-  ['settings/settings-b.json', 'customer/settings/azureactivity.json'],
+  ['logicapp/monthly-export/definition.json', 'customer/logicapp/monthly-export/definition.json'],
+  ['settings/sample.json', 'customer/settings/sample.json'],
+  ['settings/azureactivity.json', 'customer/settings/azureactivity.json'],
 ]) {
   emitJson(destination, JSON.parse(readFileSync(resolve(root, source), 'utf8')));
 }
 
-const workflow = JSON.parse(readFileSync(resolve(root, 'logicapp', 'monthly-export', 'workflow.json'), 'utf8'));
-emitJson('customer/logicapp/monthly-export/definition.json', workflow.definition);
+assert.deepEqual(readdirSync(resolve(root, 'customer', 'infra')).sort(),
+  Object.keys(stages).flatMap(stage => [`${stage}.json`, `${stage}.parameters.json`]).sort(),
+  'Remove obsolete customer infrastructure assets');
+assert.deepEqual(readdirSync(resolve(root, 'customer', 'logicapp')), ['monthly-export']);
+assert.deepEqual(readdirSync(resolve(root, 'customer', 'logicapp', 'monthly-export')), ['definition.json']);
+assert.deepEqual(readdirSync(resolve(root, 'customer', 'settings')).sort(), ['azureactivity.json', 'sample.json']);

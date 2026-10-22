@@ -1,12 +1,22 @@
-[
-  {
-    "name": "COLUMNS",
-    "value": "TimeGenerated,OperationNameValue,ActivityStatusValue,CategoryValue",
-    "slotSetting": false
+{
+  "COLUMNS": {
+    "value": [
+      "TimeGenerated",
+      "OperationNameValue",
+      "ActivityStatusValue",
+      "CategoryValue"
+    ]
   },
-  {
-    "name": "KQL_BODY",
-    "value": "AzureActivity | where TimeGenerated >= start and TimeGenerated < end | project TimeGenerated, OperationNameValue, ActivityStatusValue, CategoryValue | project bag=pack_all()",
-    "slotSetting": false
+  "KQL_BODY": {
+    "value": "AzureActivity | where TimeGenerated >= start and TimeGenerated < end | project TimeGenerated, OperationNameValue, ActivityStatusValue, CategoryValue | project bag=pack_all()"
+  },
+  "MONTH_OVERRIDE": {
+    "value": ""
+  },
+  "LAW_RESOURCE_ID": {
+    "value": "<LOG_ANALYTICS_WORKSPACE_RESOURCE_ID>"
+  },
+  "STORAGE_ACCOUNT_NAME": {
+    "value": "<STORAGE_ACCOUNT_NAME>"
   }
-]
+}

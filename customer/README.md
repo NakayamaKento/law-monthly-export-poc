@@ -1,93 +1,74 @@
-# Log Analytics 月次 CSV エクスポート：顧客評価用サンプル
+# Log Analytics 月次 CSV エクスポート：Consumption 評価用サンプル
 
-Log Analytics の前月分を日本時間の暦月で問い合わせ、非公開 Blob Storage に UTF-8 BOM 付き CSV として保存するサンプルです。Logic Apps Standard（WS1）、Azure Blob Storage **組み込み**コネクタ、Azure Monitor Logs **管理**コネクタとマネージド ID を使います。ワークフローに HTTP による REST API の直書きはありません。
+Logic Apps **Consumption（従量課金）**で前月のログを日本時間の暦月で抽出し、Storage の `exports` コンテナーに UTF-8 BOM 付き CSV を保存します。ログ取得と Blob 保存は**管理コネクタ＋システム割り当てマネージド ID（MI）**、期間計算・検証・CSV 変換は組み込みアクションです。HTTP による REST API の直書き、共有キー、SAS、ユーザーの接続資格情報は使いません。
 
-## 最初にお読みください
+## 評価前に確認してください
 
-> **導入前の停止条件：WS1 のサポート確認が必要です。**
->
-> [Microsoft Learn のホスト Storage 認証の説明](https://learn.microsoft.com/en-us/azure/logic-apps/create-single-tenant-workflows-azure-portal#set-up-managed-identity-access-to-your-storage-account)は、通常の Workflow Service Plan ではホスト Storage のキーアクセスを無効化できないと記載しています。本サンプルはコンテンツ共有を設定しない ARM 構成で起動・実行・再起動に成功した PoC を基にしていますが、**公式サポート範囲は未確認**です。お客様の要件を満たすサポート構成と確認できるまで、デプロイしないでください。キー認証や公開アクセスを一時的に許可して進める手順はありません。
+**Consumption 版の Azure 実機受入は未実施です。** 配布物の静的検証と、旧 Standard 版の実行結果は区別します。本番対応済み・portal 完結実証済みとは説明しません。
 
-本資料は**評価用サンプル**です。2026-10-21 に単一 Storage・コネクタ構成を Azure へ実投入し、ダミー実行と保存済み CSV の独立読み戻しに成功しました。1 月 4 件・0 件月・2 月 1 件を照合し、BOM・特殊文字・manifest / current も確認しています。Query の時間範囲「Set in query / クエリで設定」は実コネクタのメタデータで `"3"` と確認して配布しています。[導入手順](docs/setup.md)に従い環境設定・接続・時間範囲を確認してください。**提供者の管理 API による検証であり、portal 完結の実機受入は未実施**です。公式サポート確認の停止条件も変わりません。証拠の区分は[受入確認](docs/validation.md)を参照してください。
+Storage は初回から **Public network access: Disabled**、既定拒否、**信頼された Azure サービスの例外: 有効**にします。Private Endpoint による通信ではなく、対応サービスに公開エンドポイントの例外を許可する設計です。データ認可には別途 MI の RBAC が必要です。
 
-## 読む順序
+[Blob の公式手順](https://learn.microsoft.com/en-us/azure/connectors/connectors-create-api-azureblobstorage#access-blob-storage-in-same-region-with-system-managed-identities)は Consumption＋システム MI の方法を案内していますが、「選択したネットワークから有効」の例です。[Storage の注意事項](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-limitations)は Disabled 変更後も既存例外が有効と説明しています。**初回から Disabled の本構成で保存・読み戻しできるかを評価する必要があります。失敗した場合は停止し、一時的な Public 有効化やキー認証で回避しません。**
 
-1. [導入手順](docs/setup.md)：サポート・費用・権限の承認、閉域管理経路、基盤、設定、ワークフローの配置。
-2. [受入確認](docs/validation.md)：§2.1 に**実データ不要のダミーデータによるテスト実行手順**（設定・手動実行・CSV 確認・終了）を記載。正常・異常・閉域・再起動の確認、本番化前の条件も含む。
-3. [運用・後片付け](docs/operations.md)：対象月の変更、手動実行、CSV 取得、障害対応、削除。
+## 読む順序・同梱物
 
-読者は Azure の基本操作と IAM / VNet の知識がある管理者を想定しています。顧客側はブラウザーのみを使い、ローカルコマンド、Cloud Shell、Run Command、VS Code、CLI は不要です。
+1. [導入手順](docs/setup.md)：承認、3 段階 ARM、MI・権限・接続、開始日時。
+2. [受入確認・ダミーテスト](docs/validation.md)：実データ不要の 4 件／0 件／1 件と異常系。
+3. [運用・取得・削除](docs/operations.md)：再実行、保存済みデータの確認、取得経路、後片付け。
 
-**実ログがなくてもテスト可能です。** 同梱の KQL が `datatable` でダミーデータを生成するため、ログ取り込みや診断設定は不要です。構築済み LAW / Logic App / Storage と閉域接続・権限は必要で、サポート確認・承認条件は変わりません。
-
-## 同梱物
-
-| 資材 | 用途 |
+| 配布資材 | 用途 |
 |---|---|
-| [01-foundation.json](infra/01-foundation.json) / [入力例](infra/01-foundation.parameters.json) | VNet、Storage、ホスト用 ID、LAW（公開クエリ）、Storage 用 DNS / PE、ホスト用 RBAC |
-| [02-app-ws.json](infra/02-app-ws.json) / [入力例](infra/02-app-ws.parameters.json) | WS1、Logic App、送信用 VNet 統合サブネット |
-| [03-access.json](infra/03-access.json) / [入力例](infra/03-access.parameters.json) | アプリ MI のデータ権限、Monitor Logs API 接続とアクセスポリシー、アプリ受信用 PE / DNS |
-| [sample.json](settings/sample.json) | 初回評価用の全 8 設定。デプロイ出力に置換して使う |
-| [azureactivity.json](settings/azureactivity.json) | 任意の実ログ試験用の KQL / 列設定の差分 |
-| [workflow.json](logicapp/monthly-export/workflow.json) | Stateful ワークフローのファイル全体 |
-| [definition.json](logicapp/monthly-export/definition.json) | コードビューが定義本体だけを表示する場合の貼り付け用 |
-| [host.json](logicapp/host.json) / [connections.json](logicapp/connections.json) | 元プロジェクトのランタイム設定参照用。portal への配置手順は導入手順を参照 |
+| [基盤 ARM](infra/01-foundation.json) / [入力例](infra/01-foundation.parameters.json) | 保存用 Storage、exports、評価用 LAW |
+| [ワークフロー ARM](infra/02-workflow.json) / [入力例](infra/02-workflow.parameters.json) | 無効状態の Consumption と MI 管理接続 2 個 |
+| [権限 ARM](infra/03-access.json) / [入力例](infra/03-access.parameters.json) | アプリ MI の Blob / LAW ロール |
+| [ワークフロー定義](logicapp/monthly-export/definition.json) | Consumption の定義正本の配布コピー。接続は ARM が設定 |
+| [ダミー設定](settings/sample.json) / [実テーブル設定例](settings/azureactivity.json) | KQL・列・対象月の設定例 |
 
-このフォルダーをまとめて渡せます。同梱 ARM JSON に外部テンプレートの取得やコンパイルは不要です。`<...>` は入力時に置換するプレースホルダーで、そのまま投入する値ではありません。内部 PoC のスクリプト・個人パス・実環境 ID は配布しません。
+操作は端末のブラウザーと Azure portal のみです。CLI、Cloud Shell、Run Command、ローカルコマンドは不要です。各 JSON の `<...>` は転記先の環境の値に置き換えます。生成元や提供者向けスクリプトは配布しません。
 
-## 構成と制約
+## 構成図
 
 ```mermaid
 flowchart LR
-  Admin["閉域管理端末 / Azure portal"] --> SitePE["サイト PE"]
-  subgraph VNet["VNet：PE 用 / VNet 統合用の 2 サブネット"]
-    SitePE --> App["Logic Apps Standard WS1 / Stateful"]
-    App --> Integration["VNet 統合：送信"]
-    Integration --> BlobPE["Blob PE"]
-    Integration --> QueuePE["Queue PE"]
-    Integration --> TablePE["Table PE"]
-    DNS["Private DNS 4 ゾーン：blob / queue / table / azurewebsites"]
-  end
-  subgraph Storage["Storage 1 個：PNA / Shared Key / 匿名アクセス無効"]
-    Blob["Blob：ホスト内部データと exports コンテナー"]
-    Queue["Queue：実行基盤"]
-    Table["Table：実行基盤"]
-  end
-  BlobPE --> Blob
-  QueuePE --> Queue
-  TablePE --> Table
-  Admin --> BlobPE
-  App -->|"公開 HTTPS / システム MI"| Connector["Azure Monitor Logs 管理コネクタ / API 接続 1 個"]
-  Connector --> LAW["Log Analytics：公開問い合わせ有効 / 公開取り込み無効"]
-  HostID["ホスト用ユーザー MI"] -.-> Storage
-  App -.->|"組み込み Blob / システム MI：exports のみ"| BlobPE
+  Operator["操作者 / Azure portal<br/>管理 RBAC"]
+  App["Logic Apps Consumption<br/>システム割り当て MI"]
+  Monitor["管理接続 1<br/>Azure Monitor Logs"]
+  LAW["Log Analytics Workspace<br/>公開クエリ / MI 認可"]
+  Transform["組み込み<br/>期間計算・検証・CSV"]
+  Blob["管理接続 2<br/>Azure Blob Storage"]
+  Storage["Storage / exports<br/>Public Disabled + 信頼されたサービスの例外<br/>Shared Key / 匿名アクセス無効"]
+  Operator --> App
+  App --> Monitor --> LAW
+  Monitor --> Transform --> Blob --> Storage
 ```
 
-Private Endpoint の対象リソースは VNet 外ですが、PE の NIC を VNet 内に置いて非公開で接続します。DNS の各ゾーンは同じ VNet にリンクします。認証・管理用には Entra ID / Azure 管理系への承認済み送信も必要です。
+図は設計上の接続を示し、実機接続の成功を保証するものではありません。操作者の Storage データ取得経路は含めていません。
 
-- **Storage と Logic App サイトは非公開、Log Analytics の問い合わせは閉域対象外**です。LAW の公開クエリは有効、公開取り込みは不要なので無効のままにします。公開 API でも匿名・キー認証は使わず、マネージド ID と Log Analytics Reader で認証・認可します。
-- Storage の Shared Key を最初から無効にします。ホスト ID はユーザー割り当て、クエリ / 出力 ID はアプリのシステム割り当てです。
-- **Storage は 1 個**。ホスト内部データと CSV の `exports` コンテナーを同居させ、アプリ MI と取得者のデータ権限は `exports` に限定します。管理用のアカウント全体権限を取得者へ付与しません。強い管理境界・別の保管規制が必要な場合は別アカウントへの再設計が必要です。
-- 閉域接続は **Blob / Queue / Table / サイトの PE 計 4 個・DNS ゾーン計 4 個**。Blob PE はホストと出力で共用し、Queue / Table は Stateful 実行基盤に必要です。AMPLS・Monitor 系 DNS、File PE / DNS、未使用の ASE・管理 VM・Bastion 用サブネットは作成しません。[必要性と内訳](docs/setup.md)を参照してください。
-- Blob の保存には組み込み `uploadBlob`、CSV 変換には組み込みデータ操作を使います。Azure Monitor Logs は組み込み版がないため管理コネクタ `Run query and list results`（V2）を使い、その API 接続 1 個とアクセスポリシーのみ追加します。これは Storage へ接続する管理コネクタではありません。
-- 日時は毎月 5 日 09:00 JST を意図した設定です。実月次の自動発火と初回発火は未検証です。
-- 現在は **1 回の問い合わせで 1 CSV**。500,000 行以上は失敗扱いで、自動分割はありません。管理コネクタの応答は最大約 16 MiB、クエリは最大 100 秒（コネクタ全体 110 秒）で、以前の HTTP 版より制限が小さくなります。本番量を処理できるとは保証しません。
-- 同月の実行ごとに run を作り、成功後に `current.json` を更新します。トリガーの同時実行数は 1。`error` / `PartialError`、必須 `value` 配列と各行の `bag` 欠損は失敗にし、無応答を 0 件に変換しません。旧 run の自動削除・失敗通知は未実装です。
-- 管理経路は別途必要です。管理 VM / Bastion / NAT はテンプレートに含めません。実行専用 VM は不要です。
-- ASE v3 はキー無効化に関する公式記載がある別候補ですが、本一式には含めません。WS1 の確認が取れなければ停止し、別設計と費用を承認してください。
+| 実行に必要な資源 | 数・目的 |
+|---|---|
+| Logic App Consumption | 1 個。月次 Recurrence と実行履歴、システム MI |
+| 保存用 Storage / exports | アカウント 1 個、コンテナー 1 個。ホスト用途なし |
+| 管理 API 接続 | 2 個。Monitor Logs と Blob |
+| Log Analytics Workspace（LAW） | 1 個。本一式は隔離した評価用を作成 |
+| アプリ MI のデータ権限 | LAW の Log Analytics Reader、exports の Storage Blob Data Contributor |
 
-## 公式資料
+WS1、顧客所有のホスト用 Storage、ホスト用 Queue / Table、ユーザー割り当て MI、実行用 VNet / PE / Private DNS、ASE、VM、Bastion、NAT、AMPLS は作成しません。既存 LAW を使う本番化は対象範囲・権限・テンプレートを別途確認し、評価用 LAW を無断で置換しません。
 
-- [Standard のホスト Storage を MI 認証にする](https://learn.microsoft.com/en-us/azure/logic-apps/create-single-tenant-workflows-azure-portal#set-up-managed-identity-access-to-your-storage-account)
-- [非公開 Storage を使う Standard のデプロイ](https://learn.microsoft.com/en-us/azure/logic-apps/deploy-single-tenant-logic-apps-private-storage-account)
-- [Standard の Private Endpoint と VNet 統合](https://learn.microsoft.com/en-us/azure/logic-apps/secure-single-tenant-workflow-virtual-network-private-endpoint)
-- [Log Analytics 公開 Query API と認証](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/api/access-api)
-- [Azure Blob Storage 組み込みコネクタ](https://learn.microsoft.com/en-us/azure/logic-apps/connectors/built-in/reference/azureblob/)
-- [Azure Monitor Logs コネクタと制限](https://learn.microsoft.com/en-us/azure/connectors/connectors-azure-monitor-logs)
-- [コネクタの MI 接続・アクセスポリシー](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)
-- [Standard の Storage 利用（Blob / Queue / Table）](https://learn.microsoft.com/en-us/azure/logic-apps/estimate-storage-costs)
-- [Stateful / Stateless の状態保持と実行方式](https://learn.microsoft.com/en-us/azure/logic-apps/single-tenant-overview-compare#stateful-stateless)
-- [Private Endpoint のサービス別 Private DNS ゾーン](https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns)
+## 設計上の制限
+
+- 信頼されたサービスの例外は「この Logic App 1 個だけ」のネットワーク許可ではありません。例外の範囲と既存の RBAC を確認します。
+- Consumption はマルチテナントです。Logic App 自体に Private Endpoint を要求する場合、この構成をそのまま採用しません。
+- Blob は Consumption では管理コネクタを使います。CSV 変換は組み込みです。
+- Monitor Logs は最大約 16 MiB、500,000 行、クエリ 100 秒／コネクタ 110 秒。Basic / Auxiliary テーブルは非対応です。500,000 行以上を停止し、自動分割しません。
+- 1 回の処理で 1 CSV。run ごとに保存し、完了後に `current.json` を更新します。旧 run の自動削除・自動失敗通知はありません。
+- 実行履歴にはログや CSV が残り得ます。閲覧権限・保持・Secure Inputs / Outputs を本番前に確認します。
+- **担当者のブラウザーは Logic App の例外を利用できません。** Public Disabled の Storage からの CSV ファイル取得は、既存の承認済み取得経路が必要です。[取得条件](docs/operations.md#3-csv-の取得と完了判定)を確認してください。
+
+## 公開情報
+
+- [Consumption の portal 作成](https://learn.microsoft.com/en-us/azure/logic-apps/quickstart-create-example-consumption-workflow)
+- [信頼された Azure サービス一覧](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-trusted-azure-services)
+- [MI 対応コネクタと Consumption の接続](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)
+- [Blob 管理コネクタ](https://learn.microsoft.com/en-us/connectors/azureblobconnector/)
+- [Monitor Logs の制限](https://learn.microsoft.com/en-us/azure/connectors/connectors-azure-monitor-logs)
 - [Recurrence の開始日時・タイムゾーン](https://learn.microsoft.com/en-us/azure/connectors/connectors-native-recurrence)
-
-導入時にも最新仕様・対象契約の提供状況・組織ポリシーを確認してください。
