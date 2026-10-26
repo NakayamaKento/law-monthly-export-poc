@@ -1,0 +1,22 @@
+{
+  "COLUMNS": {
+    "value": [
+      "TimeGenerated",
+      "_ResourceId",
+      "Computer",
+      "AvgCounterValue"
+    ]
+  },
+  "KQL_BODY": {
+    "value": "Perf\n| where TimeGenerated >= start and TimeGenerated < end\n| where CounterName == \"% Processor Time\"\n| summarize AvgCounterValue=avg(CounterValue) by _ResourceId, Computer, bin(TimeGenerated, 1d)\n| project TimeGenerated, _ResourceId, Computer, AvgCounterValue\n| project bag=pack_all()"
+  },
+  "MONTH_OVERRIDE": {
+    "value": ""
+  },
+  "LAW_RESOURCE_ID": {
+    "value": "<LOG_ANALYTICS_WORKSPACE_RESOURCE_ID>"
+  },
+  "STORAGE_ACCOUNT_NAME": {
+    "value": "<STORAGE_ACCOUNT_NAME>"
+  }
+}

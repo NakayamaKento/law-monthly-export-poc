@@ -1,0 +1,6 @@
+Perf
+| where TimeGenerated >= start and TimeGenerated < end
+| where CounterName == "% Processor Time"
+| summarize AvgCounterValue=avg(CounterValue) by _ResourceId, Computer, bin(TimeGenerated, 1d)
+| project TimeGenerated, _ResourceId, Computer, AvgCounterValue
+| project bag=pack_all()

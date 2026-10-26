@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "4408678691438971272"
+      "templateHash": "6707413194767790860"
     }
   },
   "parameters": {
@@ -15,7 +15,10 @@
     },
     "workflowName": {
       "type": "string",
-      "defaultValue": "lawexp-monthly"
+      "defaultValue": "lawexp-monthly",
+      "metadata": {
+        "description": "KQL identifier and exports blob prefix. Use a different workflow name for each KQL across the shared storage account."
+      }
     },
     "storageAccountName": {
       "type": "string"
@@ -107,9 +110,18 @@
           "type": "Scope",
           "runAfter": {},
           "actions": {
-            "Settings_Columns": {
+            "RunStartedUtc": {
               "type": "Compose",
               "runAfter": {},
+              "inputs": "@utcNow()"
+            },
+            "Settings_Columns": {
+              "type": "Compose",
+              "runAfter": {
+                "RunStartedUtc": [
+                  "Succeeded"
+                ]
+              },
               "inputs": "@parameters('COLUMNS')"
             },
             "Settings_KqlBody": {
@@ -175,7 +187,7 @@
                   "Succeeded"
                 ]
               },
-              "inputs": "@if(empty(parameters('MONTH_OVERRIDE')), addToTime(formatDateTime(convertTimeZone(utcNow(),'UTC','Tokyo Standard Time'),'yyyy-MM-01T00:00:00'),-1,'Month','yyyy-MM-ddTHH:mm:ss'), concat(parameters('MONTH_OVERRIDE'),'-01T00:00:00'))"
+              "inputs": "@if(empty(parameters('MONTH_OVERRIDE')), addToTime(formatDateTime(convertTimeZone(outputs('RunStartedUtc'),'UTC','Tokyo Standard Time'),'yyyy-MM-01T00:00:00'),-1,'Month','yyyy-MM-ddTHH:mm:ss'), concat(parameters('MONTH_OVERRIDE'),'-01T00:00:00'))"
             },
             "EndJst": {
               "type": "Compose",
@@ -213,10 +225,31 @@
               },
               "inputs": "@substring(outputs('StartJst'),0,7)"
             },
-            "QueryText": {
+            "RunStampJst": {
               "type": "Compose",
               "runAfter": {
                 "Month": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": "@concat(convertTimeZone(outputs('RunStartedUtc'),'UTC','Tokyo Standard Time','yyyyMMdd-HHmmss'),'-JST')"
+            },
+            "OutputNames": {
+              "type": "Compose",
+              "runAfter": {
+                "RunStampJst": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "csvFileName": "@concat(workflow().name,'_',outputs('Month'),'_',outputs('RunStampJst'),'.csv')",
+                "runFolder": "@concat(workflow().name,'/',outputs('Month'),'/runs/',outputs('RunStampJst'),'_',workflow().run.name)"
+              }
+            },
+            "QueryText": {
+              "type": "Compose",
+              "runAfter": {
+                "OutputNames": [
                   "Succeeded"
                 ]
               },
@@ -488,8 +521,8 @@
                   "ReadFileMetadataFromServer": true
                 },
                 "queries": {
-                  "folderPath": "/exports/@{outputs('Month')}/runs/@{workflow().run.name}",
-                  "name": "export.csv",
+                  "folderPath": "/exports/@{outputs('OutputNames')['runFolder']}",
+                  "name": "@outputs('OutputNames')['csvFileName']",
                   "queryParametersSingleEncoded": true
                 },
                 "body": "@concat(uriComponentToString('%EF%BB%BF'), outputs('CsvText'))",
@@ -577,13 +610,15 @@
                 ]
               },
               "inputs": {
+                "workflowName": "@{workflow().name}",
                 "month": "@{outputs('Month')}",
                 "runId": "@{workflow().run.name}",
+                "startedAtUtc": "@outputs('RunStartedUtc')",
                 "windowStartUtc": "@{outputs('StartUtc')}",
                 "windowEndUtc": "@{outputs('EndUtc')}",
                 "rowCount": "@outputs('RowCount')",
                 "files": [
-                  "export.csv"
+                  "@outputs('OutputNames')['csvFileName']"
                 ],
                 "csvReadBackVerified": true,
                 "completedAtUtc": "@{utcNow()}"
@@ -609,7 +644,7 @@
                   "ReadFileMetadataFromServer": true
                 },
                 "queries": {
-                  "folderPath": "/exports/@{outputs('Month')}/runs/@{workflow().run.name}",
+                  "folderPath": "/exports/@{outputs('OutputNames')['runFolder']}",
                   "name": "manifest.json",
                   "queryParametersSingleEncoded": true
                 },
@@ -630,8 +665,10 @@
                 ]
               },
               "inputs": {
+                "workflowName": "@{workflow().name}",
                 "runId": "@{workflow().run.name}",
-                "path": "@{outputs('Month')}/runs/@{workflow().run.name}/"
+                "path": "@concat(outputs('OutputNames')['runFolder'],'/')",
+                "csvFileName": "@outputs('OutputNames')['csvFileName']"
               }
             },
             "Upload_Current": {
@@ -654,7 +691,7 @@
                   "ReadFileMetadataFromServer": true
                 },
                 "queries": {
-                  "folderPath": "/exports/@{outputs('Month')}",
+                  "folderPath": "/exports/@{workflow().name}/@{outputs('Month')}",
                   "name": "current.json",
                   "queryParametersSingleEncoded": true
                 },

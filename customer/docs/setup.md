@@ -4,7 +4,7 @@
 
 ## 0. 承認・停止条件
 
-本一式は新規の評価環境用です。2026-10-22 に portal からの構築とダミー CSV の保存・実行内読み戻しを確認しました。独立したファイル取得などの未確認項目は[受入確認](validation.md)を参照し、導入先ごとに次を満たすまで作成しません。
+本一式は新規の評価環境用です。導入先ごとに次の条件を確認し、承認を得てから作成します。本番利用の条件は[受入確認](validation.md)を参照してください。
 
 | 確認事項 | 条件 |
 |---|---|
@@ -17,7 +17,7 @@
 
 Storage の Public network access は初回から **Disabled** にします。例外接続に失敗しても Enabled に変更しません。設定の一時解除を目的とするタグも付けません。
 
-[公式の Blob 手順](https://learn.microsoft.com/en-us/azure/connectors/connectors-create-api-azureblobstorage#access-blob-storage-in-same-region-with-system-managed-identities)は「選択したネットワークから有効」を例示しています。[Disabled 後も例外が有効という説明](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-limitations)だけで本サンプルの接続成功を保証せず、最優先で受入確認します。
+信頼されたサービスの例外とMIの権限は別条件です。[BlobのシステムMI接続](https://learn.microsoft.com/en-us/azure/connectors/connectors-create-api-azureblobstorage#access-blob-storage-in-same-region-with-system-managed-identities)と[Storageのネットワーク制限](https://learn.microsoft.com/ja-jp/azure/storage/common/storage-network-security-limitations)を確認し、構築後はダミーテストで接続を受入確認します。
 
 ## 1. 評価用 RG と入力の準備
 
@@ -26,7 +26,7 @@ Storage の Public network access は初回から **Disabled** にします。�
 3. 各段階で **カスタム テンプレートのデプロイ → エディターで独自のテンプレートを作成する**を開き、対象 ARM JSON の全文を貼り付けて保存する。入力例は参考で、`<...>` を残したまま投入しない。
 4. **確認と作成**で検証結果を確認する。失敗したら詳細を保全して停止する。CLI / Cloud Shell に切り替えない。
 
-実機トレースでは「ファイルの読み込み」が portal のエラーになったため、上記の全文貼り付けで完了しました。空の既定テンプレートのまま進めず、貼り付けたリソース・パラメーターが表示されたことを確認してください。
+空の既定テンプレートのまま進めず、貼り付けたリソース・パラメーターが表示されたことを確認してください。
 
 公式：[portal から ARM テンプレートをデプロイ](https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/deploy-portal)。
 
@@ -66,10 +66,10 @@ Storage ブラウザーでデータが見えないことを、コンテナーの
 | ARM 入力 | 内容 |
 |---|---|
 | location | 第 1 段階と同じリージョン |
-| workflowName | 新規 Consumption の名前 |
+| workflowName | 新規 Consumption の名前兼KQL識別名。同じStorage Accountを使う全ワークフローで一意にする。Blob名の先頭にも使う |
 | storageAccountName / lawName | 第 1 段階の同名出力 |
 | startTime | 初回の承認済み JST 日時（以下の例参照） |
-| columns / kqlBody / monthOverride | ダミー評価用の値は入力例に同梱。columns は文字列配列、kqlBody は文字列。通常運用へ自動移行しない |
+| columns / kqlBody / monthOverride | ダミー評価用の値は入力例に同梱。columns は文字列配列、kqlBody は文字列。評価後の本番設定は別途行う |
 
 1. 第 1 段階と同じ RG・リージョンとし、Storage / LAW の名前・ID を入力する。
 2. ワークフロー名を決める。管理接続名はテンプレートがワークフロー名から生成する。既存の資源と衝突する名前を使わない。
@@ -80,7 +80,7 @@ Storage ブラウザーでデータが見えないことを、コンテナーの
 
 出力は `workflowName` / `workflowResourceId` / `workflowPrincipalId` / `monitorConnectionId` / `blobConnectionId`。台帳と実リソースの ID が一致することを確認します。
 
-Consumption では Storage の組み込みコネクタではなく Blob **管理**コネクタを使います。接続の ARM は V1、ワークフロー参照は `$connections` です。host.json、connections.json のファイル配置、WS1、VNet 統合の作成は不要です。
+Monitor LogsとBlobはMI認証の**管理コネクタ**です。接続はテンプレートが作成し、ワークフローの `$connections` に設定します。
 
 公式：[Consumption の portal 管理](https://learn.microsoft.com/en-us/azure/logic-apps/quickstart-create-example-consumption-workflow)、[MI 認証と接続 ARM](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)、[Recurrence の初回実行](https://learn.microsoft.com/en-us/azure/connectors/connectors-native-recurrence)。
 
@@ -90,7 +90,7 @@ Consumption では Storage の組み込みコネクタではなく Blob **管理
 
 1. ARM 入力の `workflowName` / `storageAccountName` / `lawName` に第 1・2 段階の名前を正確に転記する。プリンシパル ID はテンプレートがワークフローから取得するため、入力しない。
 2. デプロイ後、**exports コンテナー**の IAM でその MI に **Storage Blob Data Contributor**、LAW の IAM で **Log Analytics Reader**があることを確認する。
-3. Storage アカウント全体の Blob Data Owner、Queue / Table のロール、ホスト用 ID は追加しない。
+3. 権限は上記2つの対象スコープに限定し、Storageアカウント全体へ広げない。
 4. RBAC の反映を待つ。接続エラー時は反映・対象・スコープを確認し、ネットワーク制限を解除しない。
 
 出力の `blobRoleAssignmentId` / `lawRoleAssignmentId` を台帳に控え、実際の割り当て先が第 2 段階の `workflowPrincipalId` と一致することを確認します。
@@ -101,7 +101,7 @@ Consumption では Storage の組み込みコネクタではなく Blob **管理
 
 Logic App の **パラメーター**、または **ロジック アプリ コード ビュー**で定義と値を確認します。画面名は portal の版で異なります。`definition.parameters` は型・既定値、外側の `parameters` は設定値です。部分 JSON で定義全体や `$connections` を消さないでください。
 
-2026-10-22 の画面では **開発ツール → ロジック アプリ コード ビュー**から編集し、**Publish** で反映しました。**Draft の自動保存だけでは公開済みの値を更新したと判定しません。** 変更前の全文を控え、外側の `parameters.<名前>.value` を変更します。保存・Publish 後は概要の有効状態も再確認し、評価を実行する直前までは Disabled に戻します。
+**開発ツール → ロジック アプリ コード ビュー**で変更する場合は、変更前の全文を控え、外側の `parameters.<名前>.value` を編集して **Publish** します。**Draftの自動保存だけでは反映完了としません。** 公開成功と再表示した値を確認し、試験直前までDisabledを維持します。
 
 | ワークフローパラメーター | 用途 |
 |---|---|
@@ -114,7 +114,7 @@ Logic App の **パラメーター**、または **ロジック アプリ コー
 
 開始日時はワークフローパラメーターではなく、トリガーの `recurrence.startTime` に設定されます。`START_TIME` パラメーターは追加しません。
 
-1. Query の **Time Range Type** を **Set in query / クエリで設定**として確認する。配布定義の内部値は `"3"`、timerange は `{}`。この内部値は旧接続メタデータに基づくため、Consumption のデザイナーでも表示・保存内容が対応することを受入確認する。
+1. Query の **Time Range Type** が **Set in query / クエリで設定**であることを確認する。配布定義の内部値は `"3"`、timerange は `{}`。KQL本文のstart / endで期間を指定する。
 2. Blob の V2 操作のアカウント名はカスタム値として指定される。キー認証へ変更しない。
 3. ワークフローが無効、Recurrence が承認した将来日時、同時実行数が 1 であることを確認する。
 4. [ダミーテスト](validation.md#2-実データ不要のダミーテスト)へ進む。接続や画面操作が成立しない場合は未達として記録し、停止する。
@@ -122,3 +122,11 @@ Logic App の **パラメーター**、または **ロジック アプリ コー
 ダミー評価後は無効化します。本番運用にするには実テーブルの KQL・列・遅延取り込み・保持・容量を承認し、MONTH_OVERRIDE を空にして、次回予定を確認したうえで有効化してください。ダミーのまま自動運用へ移行しません。
 
 本番 KQL の準備・変更は [KQL パターンの変更](query-patterns.md)に従います。明細・失敗のみ・操作別集計の貼り付け用 KQL と対応する列を同梱しています。期間計算は変更せず、`KQL_BODY` と `COLUMNS` を差し替えます。CSV の列順はカスタム列で固定します。初回 ARM は入力 `columns` からカスタム列も生成しますが、構築後に列構成を変更する場合は `Create_CSV_table` のカスタム列も対応する `.csv-columns.json` で更新します。
+
+## 6. 同じStorage Accountへ複数KQLを出力する
+
+**第1段階は1回だけ、第2・3段階はKQLごと**に実施します。同じRG・リージョンで、Storage / LAW の名前は共通、`workflowName` は用途別の一意な名前にします。1つのStorage Account・exportsコンテナーを共用し、追加のStorage Accountは作りません。2本目に1本目と同じ `workflowName` を指定すると既存ワークフローを上書きするため停止してください。
+
+保存先は `exports/<workflowName>/<YYYY-MM>/runs/<実行日時JST>_<run-id>/`、CSV名は `<workflowName>_<対象月>_<実行日時JST>.csv`、currentは `exports/<workflowName>/<YYYY-MM>/current.json` です。CSV名に実行IDは入れず、実行フォルダーには同一秒の衝突防止用として残します。各ワークフローに別のシステムMI・管理接続2個・ロール2個が必要です。追加KQLの入力シート（ARM入力と作成後のパラメーターの対応）、メモリKQLの追加例、Perfの日次CPU平均、列設定、実データなしの試験は [KQLカスタマイズ手順 §5](query-patterns.md#5-複数kqlを1つのstorage-accountへ保存する)を参照してください。用途名はworkflowNameで指定し、Blobアクションの手修正は不要です。
+
+各ワークフローのダミーテストと、KQL間で保存先・currentが分かれることを[受入確認](validation.md)に記録します。

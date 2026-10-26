@@ -1,6 +1,7 @@
 targetScope = 'resourceGroup'
 
 param location string = resourceGroup().location
+@description('KQL identifier and exports blob prefix. Use a different workflow name for each KQL across the shared storage account.')
 param workflowName string = 'lawexp-monthly'
 param storageAccountName string
 param lawName string
