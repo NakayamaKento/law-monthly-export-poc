@@ -1,0 +1,18 @@
+[
+  {
+    "header": "TimeGenerated",
+    "value": "@item()['TimeGenerated']"
+  },
+  {
+    "header": "_ResourceId",
+    "value": "@item()['_ResourceId']"
+  },
+  {
+    "header": "Computer",
+    "value": "@item()['Computer']"
+  },
+  {
+    "header": "AvgCounterValue",
+    "value": "@item()['AvgCounterValue']"
+  }
+]

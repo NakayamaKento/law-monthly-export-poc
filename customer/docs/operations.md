@@ -2,12 +2,12 @@
 
 [入口](../README.md) / [導入](setup.md) / [ダミーテスト・受入確認](validation.md)
 
-操作は Azure portal のみです。実データがない初回評価は[ダミーテスト](validation.md#2-実データ不要のダミーテスト)を使います。以下は運用設計と受入手順であり、Consumption の実機成功を保証するものではありません。
+操作はAzure portalで行います。初回は[ダミーテスト](validation.md#2-実データ不要のダミーテスト)を完了し、業務KQL・固定列・対象月・次回予定を受入確認してから月次運用を開始します。
 
 ## 1. 通常の月次処理
 
 - MONTH_OVERRIDE が空なら実行開始時点の JST 前月を処理します。開始を含み、翌月開始を含みません。
-- 意図した定期実行は毎月 5 日 09:00 JST。[Recurrence の開始日時・タイムゾーン](https://learn.microsoft.com/en-us/azure/connectors/connectors-native-recurrence)と実際の次回予定を確認します。実月次発火は未観測です。
+- 定期実行は毎月5日09:00 JSTです。[Recurrenceの開始日時・タイムゾーン](https://learn.microsoft.com/en-us/azure/connectors/connectors-native-recurrence)と次回予定を確認し、初回の月次実行結果を記録します。
 - 遅延取り込みがある場合、5 日時点で前月データが完全とは限りません。締め・再抽出・保持は顧客で決定します。
 - 自動失敗通知・旧 run 自動削除は未実装です。管理者が履歴・件数・current を確認します。
 - 実行履歴に本文が残り得るため、閲覧権限・保持・[Secure Inputs / Outputs](https://learn.microsoft.com/en-us/azure/logic-apps/set-up-security-permissions#secure-data-in-run-history)を本番前に確認します。
@@ -16,8 +16,8 @@
 
 1. Logic App を無効化し、履歴に Running がないことを確認する。
 2. 現在のパラメーター・有効状態を台帳へ控える。
-3. **パラメーター / コード ビュー**で MONTH_OVERRIDE を `yyyy-MM`（例 `2026-01`）にする。COLUMNS と KQL_BODY は対で変更する。LAW_RESOURCE_ID、STORAGE_ACCOUNT_NAME、`$connections` は保持する。存在する年月を入力する。
-4. 保存後に再表示して値を確認する。Standard の環境変数・ホスト再起動の操作はない。
+3. **パラメーター / コード ビュー**でMONTH_OVERRIDEを `yyyy-MM`（例 `2026-01`）にする。対象月だけの再取得ではKQL・列を変えない。LAW_RESOURCE_ID、STORAGE_ACCOUNT_NAME、`$connections` も保持する。
+4. 保存・Publish成功後に再表示して値を確認する。Draftの自動保存だけでは反映完了としない。
 5. 初回開始日時が将来であることを確認し、有効化する。想定外の自動実行がないか履歴を確認してから、1 回だけ手動実行する。
 6. 実行 ID、対象月、UTC 窓、RowCount、最終状態を記録し、次節で保存内容を確認する。
 7. 評価中は再度無効化する。通常運用へ戻す場合は元の KQL / COLUMNS と MONTH_OVERRIDE の空文字、開始日時・次回予定を確認してから有効化する。
@@ -28,14 +28,17 @@
 
 ```text
 exports（コンテナー）
-  <YYYY-MM>/
-    current.json
-    runs/<run-id>/
-      export.csv
-      manifest.json
+  <workflowName>/
+    <YYYY-MM>/
+      current.json
+      runs/<実行日時yyyyMMdd-HHmmss>-JST_<run-id>/
+        <workflowName>_<対象月yyyy-MM>_<実行日時yyyyMMdd-HHmmss>-JST.csv
+        manifest.json
 ```
 
-保存は run ごとです。成功後に current を更新します。manifest の rowCount は JSON 数値、files は `["export.csv"]`。独自の出力契約で、Microsoft の共通仕様ではありません。
+保存はワークフロー名・対象月・runごとです。CSV名の例は `lawexp-perf-cpu_2026-09_20261026-232101-JST.csv`。日時は処理開始時に1回だけ取得するため、処理中や再試行で名前を変えません。実行フォルダーは日時を先頭にし、同じ秒の別実行による上書きを防ぐため末尾に完全な実行IDを残します。CSV名には実行IDを入れません。
+
+CSVの保存・読み戻し一致を確認してからmanifestを保存し、最後にそのワークフロー・月のcurrentを更新します。manifestのrowCountはJSON数値、filesは実際のCSV名1個の配列です。manifestとcurrentにはworkflowNameとrunIdを記録し、currentのpathはコンテナー基準の相対パス、csvFileNameはCSV名です。命名時刻はmanifest.startedAtUtcに記録した先頭アクションのUTC時刻をJSTへ変換します。概要履歴の受付時刻と秒がずれる場合があります。
 
 ### 実行履歴での保存内容確認
 
@@ -52,18 +55,18 @@ exports（コンテナー）
 承認済み経路がある場合：
 
 1. portal の Storage ブラウザーで **Microsoft Entra ユーザーアカウント**認証を使う。必要な管理プレーン権限と exports の Storage Blob Data Reader を管理者が付与する。
-2. 対象月の current を読み、その runId と path（コンテナー基準の相対パス）を確認する。
-3. **その path の** manifest と CSV を取得する。最新時刻の別 run を勝手に選ばない。
-4. manifest の month / runId / UTC 窓 / rowCount / files を履歴と照合する。
+2. 対象KQLのワークフロー名と対象月を台帳で確認し、`<workflowName>/<YYYY-MM>/current.json` を読む。workflowName・runId・path（コンテナー基準の相対パス）が一致することを確認する。
+3. **そのpathの**manifestを取得する。current.csvFileNameとmanifest.filesの1個の名前が一致することを確認し、**その名前のCSV**を取得する。ファイル名を決め打ちしたり、最新時刻の別runを勝手に選んだりしない。
+4. manifestのworkflowName / month / runId / startedAtUtc / UTC窓 / rowCount / filesを履歴と照合する。CSV名の実行日時はJST、manifestのstartedAtUtcはUTCなので9時間差を考慮する。
 5. CSV 対応ソフトで列順・論理件数・全値・BOM を確認する。改行数で件数を数えない。数式・日付の自動解釈を避ける。
 
-バイト列・保存 MIME・Content-MD5・サイズなどは Consumption で実測して記録します。過去版のハッシュや MIME を合格値として流用しません。実行履歴の JSON を表示・保存したことを、CSV ファイルの取得成功と扱わないでください。
+取得したCSVの本文・文字コード・サイズと、連携先で必要なContent-Type等を確認します。実行履歴のJSONを表示・保存したことを、CSVファイルの取得成功と扱わないでください。
 
 公式：[portal の Blob データ認証と権限](https://learn.microsoft.com/en-us/azure/storage/blobs/authorize-data-operations-portal)、[ネットワーク制限と portal のデータ操作](https://learn.microsoft.com/en-us/azure/storage/common/storage-network-security-limitations)。
 
 ### KQL パターンを変更する場合
 
-[KQL パターンの変更](query-patterns.md)に従い、`KQL_BODY` と `COLUMNS` を差し替えます。列構成が変わる場合は `Create_CSV_table` のカスタム列も更新します。CSV は明示したカスタム列の配列順で生成し、bag のキー順には依存しません。接続と前月計算は共通です。同月に別パターンを実行すると、run 別の成果物は残りますが `current.json` は最後の成功 run を指します。台帳にパターン名・KQL・列・対象月・run ID を残してください。複数パターンの同時自動実行や、パターン別 current の分離は未実装です。
+[KQL パターンの変更](query-patterns.md)に従い、`KQL_BODY` と `COLUMNS` を差し替えます。列構成が変わる場合は `Create_CSV_table` のカスタム列も更新します。CSV は明示したカスタム列の配列順で生成し、bag のキー順には依存しません。接続と前月計算は共通です。毎月独立して取得するKQLは別ワークフローへ割り当て、同じStorage Accountのワークフロー名別パスに保存します。currentもワークフロー・月ごとに独立します。同一ワークフロー内でKQLを切り替えると、その月のcurrentは最後の成功runを指す点は変わりません。台帳にワークフロー名・KQL・列・対象月・run IDを残してください。1ワークフローでの複数KQL一括実行、ワークフロー間の全体排他は実装していません。
 
 ## 4. 失敗時の扱い
 
@@ -85,14 +88,12 @@ exports（コンテナー）
 
 ## 5. 後片付け
 
+複数KQLで基盤を共有している場合、**1本だけの廃止で共通Storage・exports・LAW・RGを削除しません。** 対象ワークフローを無効化してRunningなしを確認し、承認された対象のワークフロー・専用API接続・MIのロール割り当てだけを整理します。保存済みデータは保持ルールに従います。専用RG全体の削除は、その中の全ワークフローと共通基盤を廃止する承認がある場合だけです。
+
 1. Logic App を無効化し、実行中でないことを確認する。
 2. 必要な CSV と証拠を承認済み経路で保全する。取得不能ならその事実を記録し、保全前の削除は承認を得る。
-3. **新規の専用 RG**に無関係な資源がないことと、削除ロック・保持ルールを確認し、RG を削除する。
+3. **新規の専用RG**に無関係な資源がないことと、削除ロック・保持ルールを確認する。RGの **リソース グループの削除**で対象名を入力し、ボタンの有効化を待って最終確認後に削除する。操作できない場合は対象・権限を確認して停止し、無効ボタンの強制操作やCLI / RESTへの切り替えをしない。
 4. RG 外に今回追加したロール割り当て・取得用ネットワーク設定等があれば、台帳の今回作成分だけ削除する。本一式はサブスクリプション診断設定を作らない。
-5. 削除完了とサブスクリプションのリソース一覧、必要に応じ各スコープのロール割り当てを確認し、残存有無を台帳へ記録する。課金画面が即時 0 であることを完了条件にしない。
+5. 削除成功通知と、元のRG画面を再読み込みした対象RGの「見つかりません」を確認する。サブスクリプションのリソース一覧と必要なスコープのロール割り当ても確認し、今回作成分の残存有無を台帳へ記録する。課金画面が即時0であることを完了条件にしない。
 
-**既存 RG を使った場合は RG ごと削除しません。** 今回作成した Consumption・接続・Storage・評価用 LAW・権限だけを個別に削除します。既存プラン・旧 PoC・共有 DNS・診断設定を巻き込まないでください。失敗時もこの評価環境だけを対象にします。
-
-提供者環境の2026-10-26検証では、当初RG削除画面のボタンが確認名入力後も無効のままでした。RG内の一覧で対象6資源のみを選択し、コマンドの「その他 → 削除」、確認文字列と最終ダイアログを経る別の正規UIでは削除できました。通知の成功6・失敗0と、検索条件なし・種類／場所すべての一覧0件を確認しました。この時点ではRG削除完了とはせず、その後、再サインイン・ブラウザー共有接続復旧後に空RGの削除を再試行しました。確認名入力の反映を待ってボタンの有効化を確認し、通常操作と最終確認を経て削除成功通知を確認。元のRG URLを再読み込みし、対象RGの404も確認したため、最終的にRGを含め削除完了としました。無効だった根本原因は未特定です。同様の場合は対象・依存関係・権限を再確認して記録し、無効ボタンの強制操作やCLI / RESTへの切り替えはしないでください。
-
-本版は App Service プランやサイトを作成・削除しません。旧 Standard 環境の整理を、この Consumption の削除手順に含めないでください。
+共有資源が混在するRGは丸ごと削除しません。台帳で今回作成したConsumption・専用接続・Storage・評価用LAW・権限だけを特定し、承認済みの範囲を個別に削除します。失敗時も削除範囲を広げません。

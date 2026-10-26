@@ -13,13 +13,24 @@ const delivered = path => json(`customer/${path}`);
 const definition = json('logicapp/monthly-export/definition.json');
 const actions = definition.actions.Export.actions;
 const sample = json('settings/sample.json');
-const settingNames = ['sample', 'azureactivity', 'azureactivity-failures', 'azureactivity-summary'];
+const settingNames = ['sample', 'azureactivity', 'azureactivity-failures', 'azureactivity-summary', 'perf-cpu-daily'];
 const stages = ['01-foundation', '02-workflow', '03-access'];
 
 function definitionForPattern(name) {
   const workflow = structuredClone(definition);
   workflow.actions.Export.actions.Create_CSV_table.inputs.columns = delivered(`settings/${name}.csv-columns.json`);
   return workflow;
+}
+
+function storedRun(result) {
+  const { workflowName, month } = result.outputs.Manifest;
+  const current = JSON.parse(result.blobs.get(`/exports/${workflowName}/${month}/current.json`));
+  assert.deepEqual(current, result.outputs.Current);
+  const manifest = JSON.parse(result.blobs.get(`/exports/${current.path}manifest.json`));
+  assert.equal(current.csvFileName, manifest.files[0]);
+  const csv = result.blobs.get(`/exports/${current.path}${current.csvFileName}`);
+  assert(csv, 'Current and manifest must reference an existing CSV');
+  return { current, manifest, csv };
 }
 
 function files(directory) {
@@ -195,7 +206,8 @@ test('customer KQL patterns keep the monthly window and match their documented o
     const settings = json(`settings/${name}.json`);
     const kql = settings.KQL_BODY.value;
     assert.equal(settings.MONTH_OVERRIDE.value, '');
-    assert(kql.startsWith('AzureActivity\n| where TimeGenerated >= start and TimeGenerated < end\n'));
+    const table = name === 'perf-cpu-daily' ? 'Perf' : 'AzureActivity';
+    assert(kql.startsWith(`${table}\n| where TimeGenerated >= start and TimeGenerated < end\n`));
     assert(!/\b(?:ago|now|startofmonth)\s*\(|let\s+(?:start|end)\s*=/i.test(kql));
     assert(kql.endsWith(`| project ${settings.COLUMNS.value.join(', ')}\n| project bag=pack_all()`));
     assert(guide.includes(`../settings/${name}.kql`));
@@ -206,6 +218,11 @@ test('customer KQL patterns keep the monthly window and match their documented o
   assert(json('settings/azureactivity-failures.json').KQL_BODY.value.includes('| where ActivityStatusValue =~ "Failed"'));
   assert(json('settings/azureactivity-summary.json').KQL_BODY.value.includes(
     '| summarize RecordCount=count() by OperationNameValue, ActivityStatusValue'));
+  const perf = json('settings/perf-cpu-daily.json');
+  assert(perf.KQL_BODY.value.includes('| where CounterName == "% Processor Time"'));
+  assert(perf.KQL_BODY.value.includes(
+    '| summarize AvgCounterValue=avg(CounterValue) by _ResourceId, Computer, bin(TimeGenerated, 1d)'));
+  assert.deepEqual(perf.COLUMNS.value, ['TimeGenerated', '_ResourceId', 'Computer', 'AvgCounterValue']);
 });
 
 test('offline WDL harness accepts each pattern response shape and rejects stale columns', () => {
@@ -213,6 +230,7 @@ test('offline WDL harness accepts each pattern response shape and rejects stale 
     azureactivity: { TimeGenerated: '2026-01-15T03:04:05Z', OperationNameValue: 'sample/write', ActivityStatusValue: 'Succeeded', CategoryValue: 'Administrative' },
     'azureactivity-failures': { TimeGenerated: '2026-01-15T03:04:05Z', OperationNameValue: 'sample/write', ActivityStatusValue: 'Failed', CategoryValue: 'Administrative' },
     'azureactivity-summary': { OperationNameValue: 'sample/write', ActivityStatusValue: 'Succeeded', RecordCount: 4 },
+    'perf-cpu-daily': { AvgCounterValue: 12.5, Computer: 'sample-computer', _ResourceId: '/sample-resource', TimeGenerated: '2026-01-15T00:00:00Z' },
   };
   for (const [name, bag] of Object.entries(fixtures)) {
     const settings = json(`settings/${name}.json`);
@@ -227,14 +245,17 @@ test('offline WDL harness accepts each pattern response shape and rejects stale 
       assert.equal(result.outputs.EndUtc, '2026-01-31T15:00:00');
       assert.equal(result.outputs.QueryText,
         `let start=datetime(2025-12-31T15:00:00); let end=datetime(2026-01-31T15:00:00); ${settings.KQL_BODY.value}`);
-      const bytes = result.blobs.get('/exports/2026-01/runs/run-1/export.csv');
+      const { csv: bytes, manifest } = storedRun(result);
       assert.equal(bytes.subarray(0, 3).toString('hex'), 'efbbbf');
       assert(bytes.subarray(3).toString('utf8').startsWith(`${settings.COLUMNS.value.join(',')}\r\n`));
-      const manifest = JSON.parse(result.blobs.get('/exports/2026-01/runs/run-1/manifest.json'));
       assert.equal(manifest.rowCount, value.length);
       if (name.endsWith('summary') && value.length) {
         assert(bytes.toString('utf8').includes('sample/write,Succeeded,4'));
         assert.equal(manifest.rowCount, 1, 'rowCount counts CSV rows, not source logs');
+      }
+      if (name === 'perf-cpu-daily' && value.length) {
+        assert.equal(bytes.subarray(3).toString('utf8'),
+          'TimeGenerated,_ResourceId,Computer,AvgCounterValue\r\n2026-01-15T00:00:00Z,/sample-resource,sample-computer,12.5\r\n');
       }
     }
     settings.COLUMNS.value = sample.COLUMNS.value;
@@ -293,7 +314,7 @@ test('CSV uses configured column order even when bag keys arrive in different or
     },
   });
   assert.equal(result.status, 'Succeeded', result.error?.stack);
-  const bytes = result.blobs.get('/exports/2026-01/runs/run-1/export.csv');
+  const bytes = storedRun(result).csv;
   assert.equal(bytes.subarray(0, 3).toString('hex'), 'efbbbf');
   assert.equal(bytes.subarray(3).toString('utf8'),
     'TimeGenerated,Id,Text\r\n2026-01-01T00:00:00Z,2,"comma, quote "" and 日本語"\r\n2026-01-02T00:00:00Z,3,"line1\nline2"\r\n');
@@ -310,7 +331,7 @@ test('each pattern exports values in its explicit column order, not input key or
       settings.MONTH_OVERRIDE.value = month;
       const result = runWorkflow(workflow, settings, { queryResponse: { value: [{ bag }] } });
       assert.equal(result.status, 'Succeeded', result.error?.stack);
-      assert.equal(result.blobs.get(`/exports/${month}/runs/run-1/export.csv`).subarray(3).toString('utf8'),
+      assert.equal(storedRun(result).csv.subarray(3).toString('utf8'),
         `${columns.join(',')}\r\n${columns.map((_, index) => `value-${index}`).join(',')}\r\n`);
     }
     const mismatched = structuredClone(workflow);
@@ -340,9 +361,16 @@ test('publish is ordered after saved-byte readback, with idempotent create/repla
     assert(!Object.hasOwn(action.inputs.queries, 'overwrite'), 'CreateFile_V2 has no overwrite query parameter');
     assert.match(action.description, /replac/i);
   }
-  assert(actions.Upload_CSV.inputs.queries.folderPath.includes('/runs/'));
-  assert(actions.Upload_Manifest.inputs.queries.folderPath.includes('/runs/'));
-  assert.equal(actions.Upload_Current.inputs.queries.folderPath, "/exports/@{outputs('Month')}");
+  assert(actions.OutputNames.inputs.runFolder.includes('/runs/'));
+  assert.equal(actions.Upload_Current.inputs.queries.folderPath, "/exports/@{workflow().name}/@{outputs('Month')}");
+  for (const name of ['Upload_CSV', 'Upload_Manifest']) {
+    assert.equal(actions[name].inputs.queries.folderPath,
+      "/exports/@{outputs('OutputNames')['runFolder']}");
+  }
+  assert.equal(actions.Upload_CSV.inputs.queries.name, "@outputs('OutputNames')['csvFileName']");
+  assert.equal(actions.Current.inputs.path, "@concat(outputs('OutputNames')['runFolder'],'/')");
+  assert.equal(actions.Current.inputs.csvFileName, "@outputs('OutputNames')['csvFileName']");
+  assert.deepEqual(actions.Manifest.inputs.files, ["@outputs('OutputNames')['csvFileName']"]);
   assert.equal(actions.Upload_Current.inputs.queries.name, 'current.json');
   assert.equal(actions.Upload_CSV.inputs.headers['Content-Type'], 'text/csv; charset=utf-8');
   assert.equal(actions.Upload_Current.inputs.headers['Content-Type'], 'application/json; charset=utf-8');
@@ -359,7 +387,7 @@ test('offline WDL harness exercises 4/0/1 monthly cases, exact boundaries, BOM, 
     const result = runWorkflow(definition, settings);
     assert.equal(result.status, 'Succeeded', result.error?.stack);
     assert.equal(result.outputs.RowCount, count);
-    const bytes = result.blobs.get(`/exports/${month}/runs/run-1/export.csv`);
+    const { csv: bytes, manifest } = storedRun(result);
     assert.equal(bytes.subarray(0, 3).toString('hex'), 'efbbbf');
     const csv = bytes.subarray(3).toString('utf8');
     assert(csv.startsWith('TimeGenerated,Id,Text\r\n'));
@@ -374,11 +402,13 @@ test('offline WDL harness exercises 4/0/1 monthly cases, exact boundaries, BOM, 
       assert(csv.includes('"comma, quote "" and 日本語"'));
       assert(csv.includes('"line1\nline2"'));
     }
-    const manifest = JSON.parse(result.blobs.get(`/exports/${month}/runs/run-1/manifest.json`));
     assert.equal(manifest.rowCount, count);
+    assert.equal(manifest.workflowName, 'lawexp-monthly');
     assert.equal(manifest.csvReadBackVerified, true);
-    assert.deepEqual(JSON.parse(result.blobs.get(`/exports/${month}/current.json`)), {
-      runId: 'run-1', path: `${month}/runs/run-1/`,
+    assert.deepEqual(JSON.parse(result.blobs.get(`/exports/lawexp-monthly/${month}/current.json`)), {
+      workflowName: 'lawexp-monthly', runId: 'run-1',
+      path: `lawexp-monthly/${month}/runs/20260305-090000-JST_run-1/`,
+      csvFileName: `lawexp-monthly_${month}_20260305-090000-JST.csv`,
     });
     assert(result.trace.indexOf('Check_Read_Back_CSV') < result.trace.indexOf('Upload_Manifest'));
   }
@@ -392,15 +422,141 @@ test('offline WDL harness also handles default previous month and serialized sam
   assert.equal(normal.outputs.Month, '2026-01');
   const again = runWorkflow(definition, sample, { blobs: normal.blobs, runId: 'run-2' });
   assert.equal(again.status, 'Succeeded', again.error?.stack);
-  assert(again.blobs.has('/exports/2026-01/runs/run-1/export.csv'));
-  assert(again.blobs.has('/exports/2026-01/runs/run-2/export.csv'));
-  assert.equal(JSON.parse(again.blobs.get('/exports/2026-01/current.json')).runId, 'run-2');
+  for (const result of [normal, again]) {
+    assert(again.blobs.has(`/exports/${result.outputs.Current.path}${result.outputs.Current.csvFileName}`));
+  }
+  assert.equal(JSON.parse(again.blobs.get('/exports/lawexp-monthly/2026-01/current.json')).runId, 'run-2');
+});
+
+test('different KQL workflows share storage without mixing CSV, manifest or current', () => {
+  const blobs = new Map();
+  const cpuSettings = json('settings/perf-cpu-daily.json');
+  const activitySettings = json('settings/azureactivity.json');
+  const cpuWorkflow = definitionForPattern('perf-cpu-daily');
+  const activityWorkflow = definitionForPattern('azureactivity');
+  const cpuName = 'lawexp-perf-cpu';
+  const activityName = 'lawexp-activity';
+  const common = { blobs, now: '2026-02-05T00:00:00Z', runId: 'same-run-id' };
+  const cpu = runWorkflow(cpuWorkflow, cpuSettings, {
+    ...common, workflowName: cpuName,
+    queryResponse: { value: [{ bag: { AvgCounterValue: 12.5, Computer: 'sample-computer', _ResourceId: '/sample-resource', TimeGenerated: '2026-01-15T00:00:00Z' } }] },
+  });
+  assert.equal(cpu.status, 'Succeeded', cpu.error?.stack);
+  const activity = runWorkflow(activityWorkflow, activitySettings, {
+    ...common, workflowName: activityName,
+    queryResponse: { value: [{ bag: { CategoryValue: 'Administrative', ActivityStatusValue: 'Succeeded', OperationNameValue: 'sample/write', TimeGenerated: '2026-01-15T00:00:00Z' } }] },
+  });
+  assert.equal(activity.status, 'Succeeded', activity.error?.stack);
+  assert.equal(blobs.size, 6);
+  for (const [workflowName, settings] of [[cpuName, cpuSettings], [activityName, activitySettings]]) {
+    const current = JSON.parse(blobs.get(`/exports/${workflowName}/2026-01/current.json`));
+    assert.deepEqual(current, {
+      workflowName, runId: 'same-run-id',
+      path: `${workflowName}/2026-01/runs/20260205-090000-JST_same-run-id/`,
+      csvFileName: `${workflowName}_2026-01_20260205-090000-JST.csv`,
+    });
+    const manifest = JSON.parse(blobs.get(`/exports/${current.path}manifest.json`));
+    assert.equal(manifest.workflowName, workflowName);
+    assert.equal(manifest.runId, current.runId);
+    assert.equal(manifest.rowCount, 1);
+    assert.equal(manifest.csvReadBackVerified, true);
+    assert.deepEqual(manifest.files, [current.csvFileName]);
+    assert(blobs.get(`/exports/${current.path}${current.csvFileName}`).subarray(3).toString('utf8')
+      .startsWith(`${settings.COLUMNS.value.join(',')}\r\n`));
+  }
+  const activityBefore = new Map([...blobs].filter(([path]) => path.startsWith(`/exports/${activityName}/`)));
+  const zero = runWorkflow(cpuWorkflow, cpuSettings, {
+    ...common, workflowName: cpuName, runId: 'zero-run', queryResponse: { value: [] },
+  });
+  assert.equal(zero.status, 'Succeeded', zero.error?.stack);
+  assert.equal(storedRun(zero).csv.subarray(3).toString('utf8'),
+    `${cpuSettings.COLUMNS.value.join(',')}\r\n`);
+  assert(blobs.has(`/exports/${cpu.outputs.Current.path}${cpu.outputs.Current.csvFileName}`));
+  const cpuCurrent = blobs.get(`/exports/${cpuName}/2026-01/current.json`);
+  const failed = runWorkflow(cpuWorkflow, cpuSettings, {
+    ...common, workflowName: cpuName, runId: 'failed-run', queryResponse: { value: [] }, failAction: 'Upload_Manifest',
+  });
+  assert.equal(failed.status, 'Failed');
+  assert.deepEqual(blobs.get(`/exports/${cpuName}/2026-01/current.json`), cpuCurrent);
+  const nextMonth = runWorkflow(cpuWorkflow, cpuSettings, {
+    ...common, workflowName: cpuName, now: '2026-03-05T00:00:00Z', queryResponse: { value: [] },
+  });
+  assert.equal(nextMonth.status, 'Succeeded', nextMonth.error?.stack);
+  assert(blobs.has(`/exports/${cpuName}/2026-02/current.json`));
+  assert.deepEqual(blobs.get(`/exports/${cpuName}/2026-01/current.json`), cpuCurrent);
+  assert.deepEqual(new Map([...blobs].filter(([path]) => path.startsWith(`/exports/${activityName}/`))), activityBefore);
+  for (const stage of ['02-workflow', '03-access']) {
+    assert(!delivered(`infra/${stage}.json`).resources.some(resource => resource.type.startsWith('Microsoft.Storage/')),
+      'Additional KQL stages must reuse the existing Storage and container');
+  }
+});
+
+test('readable names use one start-time snapshot in JST, including day and month rollover', () => {
+  const cases = [
+    ['2026-10-26T14:21:01Z', '2026-10-26T15:00:01Z', '20261026-232101-JST', '2026-09'],
+    ['2026-12-31T14:59:59Z', '2026-12-31T15:00:01Z', '20261231-235959-JST', '2026-11'],
+  ];
+  for (const [startedAt, completedAt, stamp, month] of cases) {
+    let clockReads = 0;
+    const settings = json('settings/perf-cpu-daily.json');
+    const result = runWorkflow(definitionForPattern('perf-cpu-daily'), settings, {
+      workflowName: 'lawexp-perf-cpu', runId: 'run-a', queryResponse: { value: [] },
+      now: () => clockReads++ === 0 ? startedAt : completedAt,
+    });
+    assert.equal(result.status, 'Succeeded', result.error?.stack);
+    assert.equal(clockReads, 2, 'Only run start and completion may read the clock');
+    assert.equal(result.outputs.Month, month);
+    const { current, manifest } = storedRun(result);
+    const csvName = `lawexp-perf-cpu_${month}_${stamp}.csv`;
+    const path = `lawexp-perf-cpu/${month}/runs/${stamp}_run-a/`;
+    assert.equal(current.path, path);
+    assert.equal(current.csvFileName, csvName);
+    assert.deepEqual(manifest.files, [csvName]);
+    assert.equal(manifest.startedAtUtc, startedAt);
+    assert.equal(manifest.completedAtUtc, completedAt);
+    assert.equal(manifest.runId, 'run-a');
+    assert(result.blobs.has(`/exports/${path}${csvName}`));
+    assert(!csvName.includes('run-a'), 'CSV file names must not contain the execution ID');
+    assert(!result.blobs.has(`/exports/${path}export.csv`));
+  }
+});
+
+test('same-second runs keep both CSVs despite sharing a readable file name', () => {
+  const options = { now: '2026-10-26T14:21:01Z', workflowName: 'lawexp-perf-cpu', queryResponse: { value: [] } };
+  const settings = json('settings/perf-cpu-daily.json');
+  const workflow = definitionForPattern('perf-cpu-daily');
+  const first = runWorkflow(workflow, settings, { ...options, runId: 'run-a' });
+  assert.equal(first.status, 'Succeeded', first.error?.stack);
+  const firstStored = storedRun(first);
+  const again = runWorkflow(workflow, settings, { ...options, runId: 'run-b', blobs: first.blobs });
+  assert.equal(again.status, 'Succeeded', again.error?.stack);
+  const againStored = storedRun(again);
+  assert.equal(firstStored.current.csvFileName, againStored.current.csvFileName);
+  assert.notEqual(firstStored.current.path, againStored.current.path);
+  assert.equal(againStored.current.runId, 'run-b');
+  assert(again.blobs.has(`/exports/${firstStored.current.path}${firstStored.current.csvFileName}`));
+  assert(again.blobs.has(`/exports/${againStored.current.path}${againStored.current.csvFileName}`));
+  assert.equal(again.blobs.size, 5);
+});
+
+test('workflow-specific publication leaves legacy names and month-only blobs untouched', () => {
+  const legacy = new Map([
+    ['/exports/2026-01/current.json', Buffer.from('legacy current')],
+    ['/exports/2026-01/runs/run-1/export.csv', Buffer.from('legacy csv')],
+    ['/exports/2026-01/runs/run-1/manifest.json', Buffer.from('legacy manifest')],
+    ['/exports/lawexp-monthly/2026-01/runs/run-1/export.csv', Buffer.from('previous workflow-scoped csv')],
+    ['/exports/lawexp-monthly/2026-01/runs/run-1/manifest.json', Buffer.from('previous workflow-scoped manifest')],
+  ]);
+  const result = runWorkflow(definition, sample, { blobs: new Map(legacy) });
+  assert.equal(result.status, 'Succeeded', result.error?.stack);
+  for (const [path, bytes] of legacy) assert.deepEqual(result.blobs.get(path), bytes);
+  assert(result.blobs.has('/exports/lawexp-monthly/2026-01/current.json'));
 });
 
 test('offline failure injection leaves prior current unchanged until the final publish step', () => {
   const successful = runWorkflow(definition, sample);
   assert.equal(successful.status, 'Succeeded', successful.error?.stack);
-  const current = successful.blobs.get('/exports/2026-01/current.json');
+  const current = successful.blobs.get('/exports/lawexp-monthly/2026-01/current.json');
   const cases = [
     { queryResponse: { error: { code: 'PartialError' }, value: [] } },
     { queryResponse: {} },
@@ -417,13 +573,13 @@ test('offline failure injection leaves prior current unchanged until the final p
   for (const options of cases) {
     const result = runWorkflow(definition, sample, { ...options, blobs: new Map(successful.blobs), runId: 'failed-run' });
     assert.equal(result.status, 'Failed', JSON.stringify(options).slice(0, 120));
-    assert.deepEqual(result.blobs.get('/exports/2026-01/current.json'), current);
+    assert.deepEqual(result.blobs.get('/exports/lawexp-monthly/2026-01/current.json'), current);
   }
   const wrongColumns = structuredClone(sample);
   wrongColumns.COLUMNS.value = ['TimeGenerated', 'Id', 'Wrong'];
   const result = runWorkflow(definition, wrongColumns, { blobs: new Map(successful.blobs) });
   assert.equal(result.status, 'Failed');
-  assert.deepEqual(result.blobs.get('/exports/2026-01/current.json'), current);
+  assert.deepEqual(result.blobs.get('/exports/lawexp-monthly/2026-01/current.json'), current);
   for (const columns of [[], ['Id', 'Id']]) {
     const invalid = structuredClone(sample);
     invalid.COLUMNS.value = columns;
@@ -445,6 +601,25 @@ test('active payloads contain no environment IDs or credentials, only built-in r
     }
     assert(!/AccountKey=|SharedAccessSignature=|DefaultEndpointsProtocol=|\"clientSecret\"|\"access_token\"/.test(text), path);
   }
+});
+
+test('customer guides stay within the delivery and exclude implementation history', () => {
+  for (const path of files(customer).filter(path => path.endsWith('.md'))) {
+    const text = readFileSync(path, 'utf8');
+    assert(!/\b(?:WS1|ASE|Automation|Playwright)\b|検証専用|旧版からの移行/.test(text),
+      `${relative(root, path)}: keep past approaches and provider-only traces outside customer guides`);
+    for (const match of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+      const target = match[1].split('#')[0];
+      if (!target || /^[a-z]+:/i.test(target)) continue;
+      assert(!relative(customer, resolve(dirname(path), decodeURIComponent(target))).startsWith('..'),
+        `${relative(root, path)}: link outside customer delivery`);
+    }
+  }
+  const snippet = read('customer/docs/validation.md').match(/```kusto\r?\n([\s\S]*?)```/);
+  assert(snippet, 'Dummy test instructions must include the KQL to paste');
+  const kqlTokens = query => query.match(/"(?:\\.|[^"\\])*"|[^\s"]/g);
+  assert.deepEqual(kqlTokens(snippet[1]), kqlTokens(sample.KQL_BODY.value),
+    'Documented dummy KQL must match the canonical sample, allowing formatting outside strings');
 });
 
 test('all active documentation local links resolve without constraining wording', () => {

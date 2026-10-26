@@ -77,15 +77,24 @@ export function runWorkflow(definition, settings, options = {}) {
     azuremonitorlogs: { connectionId: 'mock-logs' },
     azureblob: { connectionId: 'mock-blob' },
   };
+  function formatDateTime(value, format) {
+    const time = new Date(value.endsWith('Z') ? value : `${value}Z`);
+    assert(!Number.isNaN(time.valueOf()), `Invalid datetime ${value}`);
+    const date = time.toISOString().slice(0, 19);
+    if (format === 'yyyy-MM-01T00:00:00') return `${date.slice(0, 7)}-01T00:00:00`;
+    if (format === 'yyyy-MM-ddTHH:mm:ss') return date;
+    if (format === 'yyyyMMdd-HHmmss') return date.slice(0, 10).replaceAll('-', '') + '-' + date.slice(11).replaceAll(':', '');
+    throw new Error(`Unsupported datetime format ${format}`);
+  }
   let item;
   const context = {
     functions: {
       parameters: key => params[key],
       outputs: key => outputs[key],
       body: key => bodies[key],
-      workflow: () => ({ run: { name: options.runId ?? 'run-1' } }),
+      workflow: () => ({ name: options.workflowName ?? 'lawexp-monthly', run: { name: options.runId ?? 'run-1' } }),
       item: () => item,
-      utcNow: () => options.now ?? '2026-03-05T00:00:00Z',
+      utcNow: () => typeof options.now === 'function' ? options.now() : options.now ?? '2026-03-05T00:00:00Z',
       empty: value => value == null || value === '' || value.length === 0,
       trim: value => value.trim(),
       length: value => value.length,
@@ -103,18 +112,13 @@ export function runWorkflow(definition, settings, options = {}) {
       base64: value => Buffer.from(value, 'utf8').toString('base64'),
       if: (condition, yes, no) => condition ? yes : no,
       equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
-      formatDateTime: (value, format) => {
-        const time = new Date(value);
-        assert(!Number.isNaN(time.valueOf()), `Invalid datetime ${value}`);
-        const date = time.toISOString().slice(0, 19);
-        return format === 'yyyy-MM-01T00:00:00' ? `${date.slice(0, 7)}-01T00:00:00` : date;
-      },
-      convertTimeZone: (value, from, to) => {
+      formatDateTime,
+      convertTimeZone: (value, from, to, format = 'yyyy-MM-ddTHH:mm:ss') => {
         assert(['UTC', 'Tokyo Standard Time'].includes(from));
         assert(['UTC', 'Tokyo Standard Time'].includes(to));
         const time = Date.parse(value.endsWith('Z') ? value : `${value}Z`);
         const offset = (from === 'UTC' ? 0 : -9) + (to === 'UTC' ? 0 : 9);
-        return new Date(time + offset * 3600000).toISOString().slice(0, 19);
+        return formatDateTime(new Date(time + offset * 3600000).toISOString(), format);
       },
       addToTime: (value, count, unit) => {
         assert.equal(unit, 'Month');

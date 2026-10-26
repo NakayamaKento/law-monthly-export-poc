@@ -4,7 +4,9 @@
 
 Azure Log Analytics の前月ログを毎月 5 日 09:00 JST に抽出し、CSV として Storage に保存する。2026-10-22 の指示により、**顧客向け資料を含む現行資材を Logic Apps Consumption に統一**した。過去の ASE / WS1 は現行の採用構成ではない。
 
-顧客向け入口は [customer/README.md](../customer/README.md)、生成・テストは [customer-maintenance.md](customer-maintenance.md)。[plan.md](plan.md) §22 が切替、§23 が portal 実構築、§26 が列順固定版の実機確認。§1～§21 は過去の計画・検証・再検討の履歴である。
+顧客向け入口は [customer/README.md](../customer/README.md)、生成・テストは [customer-maintenance.md](customer-maintenance.md)。[plan.md](plan.md) §22 が切替、§23 が portal 実構築、§26 が列順固定版の実機確認、§27 がPerf対応・複数KQLの保存先分離、§28 がCSV命名・KQL追加手順、§30 が新命名・複数KQL版の実機確認と削除。§1～§21 は過去の計画・検証・再検討の履歴である。
+
+**顧客共有の方針（2026-10-27）**：最終の現行方式だけを共有する。customerの5文書は構成・導入・ダミー試験・KQL設定／追加・運用・取得・削除・受入条件に集中し、旧方式・移行・検討過程・提供者の詳細な検証履歴を除いた。確認範囲と未確認の受入条件は残し、試行錯誤・実測の時系列は本書とplanに保全する。customerから内部資料へ誘導しない。§31参照。
 
 ## 要件と制約
 
@@ -22,17 +24,23 @@ Azure Log Analytics の前月ログを毎月 5 日 09:00 JST に抽出し、CSV 
 
 | 資源 | 用途 |
 |---|---|
-| Consumption ワークフロー 1 | システム MI、初期 Disabled、Recurrence、履歴 |
+| Consumption ワークフロー KQLごとに1 | システム MI、初期 Disabled、Recurrence、履歴 |
 | 保存用 Storage 1 / exports 1 | CSV / manifest / current。ホスト用途なし |
-| 管理 API 接続 2 | Monitor Logs と Blob。双方 MI、Consumption 用 V1 |
+| 管理 API 接続 ワークフローごとに2 | Monitor Logs と Blob。双方 MI、Consumption 用 V1 |
 | 評価用 LAW 1 | ダミー KQL 実行。ログ取り込み不要 |
-| アプリ MI のロール 2 | LAW Reader、exports の Blob Data Contributor |
+| アプリ MI のロール ワークフローごとに2 | LAW Reader、exports の Blob Data Contributor |
 
 WS1 / App Service プラン、ホスト UAMI、ホスト用 Queue / Table、実行用 VNet / PE / DNS、Files、AMPLS、ASE、VM / Bastion / NAT は作らない。CSV 取得用の既存ネットワークは別条件として扱い、この削減を理由に削除しない。
 
 Consumption の Blob は**管理コネクタ**。期間計算・CSV・条件・Parse JSON は組み込み。HTTP による REST の直書きなし。`appsetting()` ではなくワークフローパラメーターを使う。
 
-2026-10-25 に [KQL パターンの変更ガイド](../customer/docs/query-patterns.md)と明細・失敗のみ・操作別集計の設定例、貼り付け用 `.kql` の生成を追加。顧客は `KQL_BODY` と `COLUMNS` を対で変更し、通常の `MONTH_OVERRIDE=""` による前月計算は共通で使う。1 ワークフロー 1 パターンの切り替えであり、一括実行・パターン別 current は未実装。追加例は静的・オフライン検証の対象で、Azure 実機の追加検証ではない。
+2026-10-25 に [KQL パターンの変更ガイド](../customer/docs/query-patterns.md)と明細・失敗のみ・操作別集計の設定例、貼り付け用 `.kql` の生成を追加。当時は1ワークフロー内の切り替えだけで保存先分離は未実装だった。顧客は `KQL_BODY` と `COLUMNS` を対で変更し、通常の `MONTH_OVERRIDE=""` による前月計算は共通で使う。
+
+**2026-10-26の複数KQL対応**：Perfの `% Processor Time` 日次平均の設定・カスタマイズ手順を追加。固定日付をstart/endへ置換し、平均列をAvgCounterValueと明示、4列のCSVマッピングを同梱。元の `bin(TimeGenerated, 1d)` はUTC日単位で維持し、JST暦月との境界の違いを説明する。複数KQLは1KQL1ワークフローをそれぞれ月次実行し、Storage Account・exports・LAWは共有。第1段階は1回、第2・3段階はKQLごと。ワークフロー名を識別名として `exports/<workflowName>/<YYYY-MM>/...` にCSV・manifest・currentを分離し、manifest/currentにもworkflowNameを記録する。共有Storage Account内で名前を一意にする。旧パスを自動移行せず、利用側参照を変更して受入する。プレフィックスはRBAC境界ではない。1ワークフローでの複数KQL一括処理は実装しない。追加時点の検査はオフラインのみで、その後の実機結果は§30に分けて記載する。
+
+**命名改善**：CSV名を `<workflowName>_<対象月>_<実行日時yyyyMMdd-HHmmss>-JST.csv` に変更。用途名はworkflowNameで指定し、実行IDをCSV名から外す。格納先は `runs/<実行日時JST>_<run-id>/` とし、可読性と同一秒の衝突防止を両立する。時刻はRunStartedUtcで1回だけ取得し、月計算・名前生成で共用。manifest.filesとcurrent.csvFileNameは実際のCSV名、current.pathは新しいフォルダーを指す。KQL追加のARM入力／ワークフローパラメーター対応表、メモリKQL追加例、既存更新・取得処理の移行を手順に記載。§28参照。
+
+**2026-10-27の新命名・複数KQL版の実機確認**：明示承認後、portalから新規専用RGに2本・共通Storage / LAW・接続4・MIロール4を構築。初回からStorage Disabled / keylessを維持し、固定3 / 4列、Perfダミーの平均20 / 50、4 / 0 / 1件、再実行、SchemaMismatchでの保存前停止を8ケース（成功7・想定失敗1）で確認した。成功CSVは233 / 187 / 26 / 75 / 55バイトで期待値と一致し、開始UTC→JSTの新命名も一致。再実行時だけ検証専用のBlob読み取り3＋Compose 1を追加し、自currentの新run参照、列不整合失敗後・別KQL再実行後も変わらない他current、旧CSVの保持を保存実体で照合した。追加アクションは配布物には含めない。実Perf・独立ダウンロード・本番量・実月次・実機の同一秒／時計境界は未確認。2本を無効化しRunningなし、Storageの初期・終了設定一致を確認後、今回の専用RGと8資源を削除した。削除成功通知と元URLの新規読み込み404を保全。RG外の今回作成物なし、既存環境未変更。55枚の画像・実ID・JSON / CSV・検証ログは非公開作業フォルダーのみ。§30参照。
 
 **2026-10-26 の列順固定要件への対応**：上記の変更手順を補足し、列構成を変える場合は `Create_CSV_table.inputs.columns` のカスタム列も変更する。初回 ARM は入力 `columns` から生成し、構築後用には `.csv-columns.json` を同梱。`pack_all()` のキー順や Table の自動列推定に依存せず、カスタム列配列で毎月の列順・値の対応を固定する。従来はキー順の相違を Check_Header で失敗にしていたが、現在は相違を許容して指定順で出力する。ヘッダー検査・必須列検査は維持。同日に既存専用環境へ反映し、キー順が異なる bag の4/0/1件・再実行、ダミー明細4列・集計3列の期待CSV全バイト一致、不整合時の保存前停止を実機確認した。実 AzureActivity・本番KQLの検証とは区別する。
 
