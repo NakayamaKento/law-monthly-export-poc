@@ -177,7 +177,15 @@
           "Create_CSV_table": {
             "type": "Table",
             "runAfter": { "Check_Record_Columns": ["Succeeded"] },
-            "inputs": { "from": "@body('Records')", "format": "CSV" }
+            "inputs": {
+              "from": "@body('Records')",
+              "format": "CSV",
+              "columns": [
+                { "header": "TimeGenerated", "value": "@item()['TimeGenerated']" },
+                { "header": "Id", "value": "@item()['Id']" },
+                { "header": "Text", "value": "@item()['Text']" }
+              ]
+            }
           },
           "CsvText": {
             "type": "Compose",

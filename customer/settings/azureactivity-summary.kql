@@ -1,0 +1,5 @@
+AzureActivity
+| where TimeGenerated >= start and TimeGenerated < end
+| summarize RecordCount=count() by OperationNameValue, ActivityStatusValue
+| project OperationNameValue, ActivityStatusValue, RecordCount
+| project bag=pack_all()

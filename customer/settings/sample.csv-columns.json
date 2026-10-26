@@ -1,0 +1,14 @@
+[
+  {
+    "header": "TimeGenerated",
+    "value": "@item()['TimeGenerated']"
+  },
+  {
+    "header": "Id",
+    "value": "@item()['Id']"
+  },
+  {
+    "header": "Text",
+    "value": "@item()['Text']"
+  }
+]

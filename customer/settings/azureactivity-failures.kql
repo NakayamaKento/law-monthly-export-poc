@@ -1,0 +1,5 @@
+AzureActivity
+| where TimeGenerated >= start and TimeGenerated < end
+| where ActivityStatusValue =~ "Failed"
+| project TimeGenerated, OperationNameValue, ActivityStatusValue, CategoryValue
+| project bag=pack_all()
