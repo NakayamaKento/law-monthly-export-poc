@@ -61,10 +61,19 @@ for (const [stage, parameters] of Object.entries(stages)) {
 
 for (const [source, destination] of [
   ['logicapp/monthly-export/definition.json', 'customer/logicapp/monthly-export/definition.json'],
-  ['settings/sample.json', 'customer/settings/sample.json'],
-  ['settings/azureactivity.json', 'customer/settings/azureactivity.json'],
 ]) {
   emitJson(destination, JSON.parse(readFileSync(resolve(root, source), 'utf8')));
+}
+
+const settingsFiles = readdirSync(resolve(root, 'settings')).filter(name => name.endsWith('.json')).sort();
+for (const name of settingsFiles) {
+  const settings = JSON.parse(readFileSync(resolve(root, 'settings', name), 'utf8'));
+  emitJson(`customer/settings/${name}`, settings);
+  emit(`customer/settings/${name.replace(/\.json$/, '.kql')}`, `${settings.KQL_BODY.value}\n`);
+  emitJson(`customer/settings/${name.replace(/\.json$/, '.csv-columns.json')}`,
+    settings.COLUMNS.value.map(column => ({
+      header: column, value: `@item()['${column.replaceAll("'", "''")}']`,
+    })));
 }
 
 assert.deepEqual(readdirSync(resolve(root, 'customer', 'infra')).sort(),
@@ -72,4 +81,5 @@ assert.deepEqual(readdirSync(resolve(root, 'customer', 'infra')).sort(),
   'Remove obsolete customer infrastructure assets');
 assert.deepEqual(readdirSync(resolve(root, 'customer', 'logicapp')), ['monthly-export']);
 assert.deepEqual(readdirSync(resolve(root, 'customer', 'logicapp', 'monthly-export')), ['definition.json']);
-assert.deepEqual(readdirSync(resolve(root, 'customer', 'settings')).sort(), ['azureactivity.json', 'sample.json']);
+assert.deepEqual(readdirSync(resolve(root, 'customer', 'settings')).sort(),
+  settingsFiles.flatMap(name => [name, name.replace(/\.json$/, '.kql'), name.replace(/\.json$/, '.csv-columns.json')]).sort());

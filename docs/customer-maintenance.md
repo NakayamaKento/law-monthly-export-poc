@@ -8,9 +8,13 @@
 |---|---|
 | [3 段階 Bicep](../infra/customer/) | [customer/infra/](../customer/infra/) の 01-foundation / 02-workflow / 03-access ARM |
 | [Consumption 定義](../logicapp/monthly-export/definition.json) | [配布定義](../customer/logicapp/monthly-export/definition.json)。第 2 段階 ARM にも同梱 |
-| [settings/](../settings/) の設定 JSON | [customer/settings/](../customer/settings/) の sample / azureactivity |
+| [settings/](../settings/) の設定 JSON | [customer/settings/](../customer/settings/) の同名 JSON、`KQL_BODY.value` を取り出した `.kql`、`COLUMNS` 配列順の `.csv-columns.json` |
 
 ARM の入力例と Markdown は直接保守します。生成済み定義・ARM を手修正せず、正本を直して再生成してください。外部テンプレートリンクや実環境 ID、ユーザーパス、資格情報を同梱しません。
+
+KQL パターンの正本は sample / azureactivity / azureactivity-failures / azureactivity-summary の設定 JSON です。改行は JSON の `\n` で保持し、顧客用 `.kql` は生成します。追加・変更時は [顧客向け変更ガイド](../customer/docs/query-patterns.md)の一覧・列・期待値と、`customer.test.mjs` のパターン一覧・応答フィクスチャも更新してください。ハーネスは KQL エンジンではなく、実テーブル用の例では応答を注入して CSV 契約を検査します。KQL の実行結果を保証しません。
+
+CSV は組み込み Table アクションの `inputs.columns`（カスタム列）で順序と値の式を明示します。初回デプロイでは Bicep の `columns` 入力から当該配列を生成し、構築後の列構成変更は顧客が対応する `.csv-columns.json` をアクション定義へ反映します。ワークフローパラメーター内へ式文字列を入れて再評価させる方式や、bag のキー順に依存する自動列推定は使いません。配布定義のダミー用カスタム列と sample の生成配列はテストで一致させます。
 
 ## 再生成と検証
 
@@ -40,9 +44,11 @@ git --no-pager diff --check
 
 [顧客の受入確認](../customer/docs/validation.md)には実施範囲と未実施を分けて記載します。2026-10-22 に Consumption の portal 実構築・編集・4 / 0 / 1 件と再実行の保存・実行内読み戻し、列不一致・不正 KQL の失敗を確認しました。これは静的テストや旧 WS1 の結果ではなく今回の実機証拠です。ただし、取得・削除までの「portal 完結」とは表現しません。
 
+2026-10-26 に固定列順版も実機確認しました。キー順が異なる bag の4 / 0 / 1件・再実行、ダミー明細4列・集計3列は保存済みCSVの期待値と全バイト一致。カスタム列不整合は SchemaMismatch で保存前に停止しました。実 AzureActivity・顧客の本番KQLの検証とは区別します。
+
 初回 Disabled＋例外の接続は今回成功しました。保存済み current / manifest / CSV と旧 run の独立取得・照合、公開クライアント拒否、権限不足・通信障害、実月次・本番性能は引き続き未確認です。通常のブラウザーは信頼されたサービスの例外を使えないため、CSV 取得に承認済みの別経路が必要です。接続個別の JSON・exports IAM 画面・Query の選択肢表示の確認も残っています。
 
-実機検証は構成・費用・権限の承認後に専用 RG で実施し、削除承認後に RG 外も含め今回作成分のみ削除・残存確認します。今回の環境は削除未承認のため、元のダミー設定と Disabled に戻して保持しています。既存 WS1 プランを再利用・変更・削除しません。
+実機検証は構成・費用・権限の承認後に専用 RG で実施し、削除承認後に RG 外も含め今回作成分のみ削除・残存確認します。2026-10-26 は、復元・Disabledの照合後に portal の選択資源削除で6資源を削除し、成功6・失敗0と一覧0件を確認しました。一時残存した空RGも、再サインイン・ブラウザー共有接続復旧後の再試行で削除できました。RGの削除成功通知と元URL再読み込みの404を確認し、今回の後片付けは完了しています。今回RG外の新規作成はありません。既存 WS1 プランを再利用・変更・削除しません。
 
 ## 過去の削除事故を再発させない
 

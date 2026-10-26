@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "9485139759359679090"
+      "templateHash": "4408678691438971272"
     }
   },
   "parameters": {
@@ -51,6 +51,16 @@
     }
   },
   "variables": {
+    "copy": [
+      {
+        "name": "csvColumns",
+        "count": "[length(parameters('columns'))]",
+        "input": {
+          "header": "[parameters('columns')[copyIndex('csvColumns')]]",
+          "value": "[format('@item()[''{0}'']', replace(parameters('columns')[copyIndex('csvColumns')], '''', ''''''))]"
+        }
+      }
+    ],
     "$fxv#0": {
       "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
       "contentVersion": "1.0.0.0",
@@ -397,7 +407,21 @@
               },
               "inputs": {
                 "from": "@body('Records')",
-                "format": "CSV"
+                "format": "CSV",
+                "columns": [
+                  {
+                    "header": "TimeGenerated",
+                    "value": "@item()['TimeGenerated']"
+                  },
+                  {
+                    "header": "Id",
+                    "value": "@item()['Id']"
+                  },
+                  {
+                    "header": "Text",
+                    "value": "@item()['Text']"
+                  }
+                ]
               }
             },
             "CsvText": {
@@ -713,7 +737,7 @@
       },
       "properties": {
         "state": "Disabled",
-        "definition": "[union(variables('definition'), createObject('triggers', createObject('Monthly_JST_5th_0900', union(variables('definition').triggers.Monthly_JST_5th_0900, createObject('recurrence', union(variables('definition').triggers.Monthly_JST_5th_0900.recurrence, createObject('startTime', parameters('startTime'))))))))]",
+        "definition": "[union(variables('definition'), createObject('actions', createObject('Export', createObject('actions', createObject('Create_CSV_table', createObject('inputs', createObject('columns', variables('csvColumns')))))), 'triggers', createObject('Monthly_JST_5th_0900', union(variables('definition').triggers.Monthly_JST_5th_0900, createObject('recurrence', union(variables('definition').triggers.Monthly_JST_5th_0900.recurrence, createObject('startTime', parameters('startTime'))))))))]",
         "parameters": {
           "COLUMNS": {
             "value": "[parameters('columns')]"

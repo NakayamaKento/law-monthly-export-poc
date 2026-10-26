@@ -1,0 +1,14 @@
+[
+  {
+    "header": "OperationNameValue",
+    "value": "@item()['OperationNameValue']"
+  },
+  {
+    "header": "ActivityStatusValue",
+    "value": "@item()['ActivityStatusValue']"
+  },
+  {
+    "header": "RecordCount",
+    "value": "@item()['RecordCount']"
+  }
+]

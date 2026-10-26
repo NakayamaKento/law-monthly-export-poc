@@ -61,6 +61,10 @@ exports（コンテナー）
 
 公式：[portal の Blob データ認証と権限](https://learn.microsoft.com/en-us/azure/storage/blobs/authorize-data-operations-portal)、[ネットワーク制限と portal のデータ操作](https://learn.microsoft.com/en-us/azure/storage/common/storage-network-security-limitations)。
 
+### KQL パターンを変更する場合
+
+[KQL パターンの変更](query-patterns.md)に従い、`KQL_BODY` と `COLUMNS` を差し替えます。列構成が変わる場合は `Create_CSV_table` のカスタム列も更新します。CSV は明示したカスタム列の配列順で生成し、bag のキー順には依存しません。接続と前月計算は共通です。同月に別パターンを実行すると、run 別の成果物は残りますが `current.json` は最後の成功 run を指します。台帳にパターン名・KQL・列・対象月・run ID を残してください。複数パターンの同時自動実行や、パターン別 current の分離は未実装です。
+
 ## 4. 失敗時の扱い
 
 | 症状 | 確認・対応 |
@@ -69,7 +73,7 @@ exports（コンテナー）
 | Monitor Logs の 401 / 403 | LAW の ARM ID、Log Analytics Reader、公開クエリ設定、管理接続の MI 認証を確認 |
 | 接続作成でユーザーのサインインやキーを要求 | 誤った認証方式として停止。Logic Apps MI 対応の接続を確認 |
 | Query の時間範囲エラー | Set in query と KQL の start / end を確認。無関係な相対期間で絞らない |
-| KQL / SchemaMismatch / Parse JSON 失敗 | COLUMNS と project の順序・bag 列・必須 value 配列を確認。`Check_Header` は CSV ヘッダーの列順不一致でも失敗する。空配列へ置換して隠さない |
+| KQL / SchemaMismatch / Parse JSON 失敗 | COLUMNS・project・CSV のカスタム列の一致、bag 列・必須 value 配列を確認。`Check_Header` はカスタム列と COLUMNS の列順不一致でも失敗する。自動列推定や空配列へ変更して隠さない |
 | RowCap / タイムアウト / 応答超過 | 約 16 MiB、500,000 行、クエリ 100 秒 / 全体 110 秒を確認。自動分割はないため別設計 |
 | CSV 読み戻し・一致確認の失敗 | 保存済みの実体・型・エンコードを確認し、成功扱いにしない |
 | current 更新時の失敗 | 書き込まれた可能性があるため、current と run を再取得。前回のままと断定しない |
@@ -88,5 +92,7 @@ exports（コンテナー）
 5. 削除完了とサブスクリプションのリソース一覧、必要に応じ各スコープのロール割り当てを確認し、残存有無を台帳へ記録する。課金画面が即時 0 であることを完了条件にしない。
 
 **既存 RG を使った場合は RG ごと削除しません。** 今回作成した Consumption・接続・Storage・評価用 LAW・権限だけを個別に削除します。既存プラン・旧 PoC・共有 DNS・診断設定を巻き込まないでください。失敗時もこの評価環境だけを対象にします。
+
+提供者環境の2026-10-26検証では、当初RG削除画面のボタンが確認名入力後も無効のままでした。RG内の一覧で対象6資源のみを選択し、コマンドの「その他 → 削除」、確認文字列と最終ダイアログを経る別の正規UIでは削除できました。通知の成功6・失敗0と、検索条件なし・種類／場所すべての一覧0件を確認しました。この時点ではRG削除完了とはせず、その後、再サインイン・ブラウザー共有接続復旧後に空RGの削除を再試行しました。確認名入力の反映を待ってボタンの有効化を確認し、通常操作と最終確認を経て削除成功通知を確認。元のRG URLを再読み込みし、対象RGの404も確認したため、最終的にRGを含め削除完了としました。無効だった根本原因は未特定です。同様の場合は対象・依存関係・権限を再確認して記録し、無効ボタンの強制操作やCLI / RESTへの切り替えはしないでください。
 
 本版は App Service プランやサイトを作成・削除しません。旧 Standard 環境の整理を、この Consumption の削除手順に含めないでください。

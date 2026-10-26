@@ -59,6 +59,10 @@ resource blob 'Microsoft.Web/connections@2016-06-01' = {
 }
 
 var definition = loadJsonContent('../../logicapp/monthly-export/definition.json')
+var csvColumns = [for column in columns: {
+  header: column
+  value: '@item()[\'${replace(column, '\'', '\'\'')}\']'
+}]
 
 resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
   name: workflowName
@@ -67,6 +71,17 @@ resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
   properties: {
     state: 'Disabled'
     definition: union(definition, {
+      actions: {
+        Export: {
+          actions: {
+            Create_CSV_table: {
+              inputs: {
+                columns: csvColumns
+              }
+            }
+          }
+        }
+      }
       triggers: {
         Monthly_JST_5th_0900: union(definition.triggers.Monthly_JST_5th_0900, {
           recurrence: union(definition.triggers.Monthly_JST_5th_0900.recurrence, {

@@ -149,7 +149,7 @@ export function runWorkflow(definition, settings, options = {}) {
         execute(condition(action.expression) ? action.actions : action.else.actions);
         continue;
       }
-      const inputs = action.type === 'Select' ? { from: evaluate(action.inputs.from) } : evaluate(action.inputs);
+      const inputs = ['Select', 'Table'].includes(action.type) ? { from: evaluate(action.inputs.from) } : evaluate(action.inputs);
       switch (action.type) {
         case 'Compose': outputs[name] = inputs; break;
         case 'Terminate': throw new Error(inputs.runError.code);
@@ -164,20 +164,27 @@ export function runWorkflow(definition, settings, options = {}) {
           });
           break;
         case 'Table': {
-          assert.equal(inputs.format, 'CSV');
-          const columns = Object.keys(inputs.from[0] ?? {});
+          assert.equal(action.inputs.format, 'CSV');
+          const columns = action.inputs.columns;
+          assert(Array.isArray(columns) && columns.length > 0, 'CSV requires explicit columns');
           const field = value => /[",\r\n]/.test(String(value)) ? `"${String(value).replaceAll('"', '""')}"` : String(value ?? '');
-          bodies[name] = inputs.from.length
-            ? [columns, ...inputs.from.map(record => columns.map(column => record[column]))].map(row => row.map(field).join(',')).join('\r\n') + '\r\n'
-            : '';
+          const rows = [columns.map(column => evaluate(column.header)), ...inputs.from.map(record => {
+            item = record;
+            return columns.map(column => evaluate(column.value));
+          })];
+          bodies[name] = rows.map(row => row.map(field).join(',')).join('\r\n') + '\r\n';
           break;
         }
         case 'ApiConnection':
           if (inputs.host.connection.name === 'mock-logs') {
-            const records = sampleRecords(params.KQL_BODY).filter(record =>
-              Date.parse(record.TimeGenerated) >= Date.parse(`${outputs.StartUtc}Z`) &&
-              Date.parse(record.TimeGenerated) < Date.parse(`${outputs.EndUtc}Z`));
-            bodies[name] = options.queryResponse ?? { value: records.map(bag => ({ bag })) };
+            if (Object.hasOwn(options, 'queryResponse')) {
+              bodies[name] = options.queryResponse;
+            } else {
+              const records = sampleRecords(params.KQL_BODY).filter(record =>
+                Date.parse(record.TimeGenerated) >= Date.parse(`${outputs.StartUtc}Z`) &&
+                Date.parse(record.TimeGenerated) < Date.parse(`${outputs.EndUtc}Z`));
+              bodies[name] = { value: records.map(bag => ({ bag })) };
+            }
           } else {
             assert.equal(inputs.host.connection.name, 'mock-blob');
             if (inputs.method === 'post') {

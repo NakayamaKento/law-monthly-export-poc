@@ -4,7 +4,7 @@
 
 Azure Log Analytics の前月ログを毎月 5 日 09:00 JST に抽出し、CSV として Storage に保存する。2026-10-22 の指示により、**顧客向け資料を含む現行資材を Logic Apps Consumption に統一**した。過去の ASE / WS1 は現行の採用構成ではない。
 
-顧客向け入口は [customer/README.md](../customer/README.md)、生成・テストは [customer-maintenance.md](customer-maintenance.md)。[plan.md](plan.md) §22 が今回の切替、§23 が portal 実構築と検証。§1～§21 は過去の計画・検証・再検討の履歴である。
+顧客向け入口は [customer/README.md](../customer/README.md)、生成・テストは [customer-maintenance.md](customer-maintenance.md)。[plan.md](plan.md) §22 が切替、§23 が portal 実構築、§26 が列順固定版の実機確認。§1～§21 は過去の計画・検証・再検討の履歴である。
 
 ## 要件と制約
 
@@ -31,6 +31,12 @@ Azure Log Analytics の前月ログを毎月 5 日 09:00 JST に抽出し、CSV 
 WS1 / App Service プラン、ホスト UAMI、ホスト用 Queue / Table、実行用 VNet / PE / DNS、Files、AMPLS、ASE、VM / Bastion / NAT は作らない。CSV 取得用の既存ネットワークは別条件として扱い、この削減を理由に削除しない。
 
 Consumption の Blob は**管理コネクタ**。期間計算・CSV・条件・Parse JSON は組み込み。HTTP による REST の直書きなし。`appsetting()` ではなくワークフローパラメーターを使う。
+
+2026-10-25 に [KQL パターンの変更ガイド](../customer/docs/query-patterns.md)と明細・失敗のみ・操作別集計の設定例、貼り付け用 `.kql` の生成を追加。顧客は `KQL_BODY` と `COLUMNS` を対で変更し、通常の `MONTH_OVERRIDE=""` による前月計算は共通で使う。1 ワークフロー 1 パターンの切り替えであり、一括実行・パターン別 current は未実装。追加例は静的・オフライン検証の対象で、Azure 実機の追加検証ではない。
+
+**2026-10-26 の列順固定要件への対応**：上記の変更手順を補足し、列構成を変える場合は `Create_CSV_table.inputs.columns` のカスタム列も変更する。初回 ARM は入力 `columns` から生成し、構築後用には `.csv-columns.json` を同梱。`pack_all()` のキー順や Table の自動列推定に依存せず、カスタム列配列で毎月の列順・値の対応を固定する。従来はキー順の相違を Check_Header で失敗にしていたが、現在は相違を許容して指定順で出力する。ヘッダー検査・必須列検査は維持。同日に既存専用環境へ反映し、キー順が異なる bag の4/0/1件・再実行、ダミー明細4列・集計3列の期待CSV全バイト一致、不整合時の保存前停止を実機確認した。実 AzureActivity・本番KQLの検証とは区別する。
+
+試験後は元ダミーパラメーターと修正版カスタム3列へ戻して Publish。公開済みリソースJSONでパラメーター・アクション・型定義・Recurrenceの一致、Disabled / Succeededを照合し、Runningなしを確認した。その後、portal の選択資源削除で専用環境の6資源を削除し、成功6・失敗0、一致条件なしの一覧0件を確認。一時残存した空RGも、再サインイン・ブラウザー共有接続復旧後の再試行で削除できた。成功通知と元のRG URL再読み込みによる対象RGの404を確認し、後片付けは完了した。削除ボタンが当初無効だった原因は未特定。
 
 ## 公開根拠と未検証点
 
@@ -60,4 +66,4 @@ Consumption の Blob は**管理コネクタ**。期間計算・CSV・条件・P
 1. 承認済み CSV 取得経路を確定し、保存済み current → manifest → CSV と旧 run を独立照合する。
 2. exports IAM 画面、接続の個別 JSON、Query の選択肢表示、正しいデータ権限を持つ公開クライアントの拒否を確認する。
 3. 本番量・実月次・競合と再送・権限不足・通信障害、監視・保持・履歴機密性を確認する。
-4. 削除承認を得てから専用環境と RG 外の今回作成分を削除・残存確認する。
+専用環境の後片付けは2026-10-26に完了。承認範囲の6資源と空RGを portal で削除し、成功通知とRGの404を確認した。今回RG外の新規作成なし、旧RG・旧WS1は未変更、UI設定は元へ復元済み。CLI / REST や無効ボタンの強制操作で迂回していない。

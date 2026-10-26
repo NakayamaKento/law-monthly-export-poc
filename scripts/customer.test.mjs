@@ -13,7 +13,14 @@ const delivered = path => json(`customer/${path}`);
 const definition = json('logicapp/monthly-export/definition.json');
 const actions = definition.actions.Export.actions;
 const sample = json('settings/sample.json');
+const settingNames = ['sample', 'azureactivity', 'azureactivity-failures', 'azureactivity-summary'];
 const stages = ['01-foundation', '02-workflow', '03-access'];
+
+function definitionForPattern(name) {
+  const workflow = structuredClone(definition);
+  workflow.actions.Export.actions.Create_CSV_table.inputs.columns = delivered(`settings/${name}.csv-columns.json`);
+  return workflow;
+}
 
 function files(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -47,8 +54,16 @@ test('delivery contains only the three self-contained Consumption stages and can
     assert.doesNotThrow(() => JSON.parse(readFileSync(path, 'utf8')), path);
   }
   assert.deepEqual(delivered('logicapp/monthly-export/definition.json'), definition);
-  for (const name of ['sample', 'azureactivity']) {
+  assert.deepEqual(readdirSync(resolve(root, 'settings')).sort(), settingNames.map(name => `${name}.json`).sort());
+  assert.deepEqual(readdirSync(resolve(customer, 'settings')).sort(),
+    settingNames.flatMap(name => [`${name}.json`, `${name}.kql`, `${name}.csv-columns.json`]).sort());
+  for (const name of settingNames) {
     assert.deepEqual(delivered(`settings/${name}.json`), json(`settings/${name}.json`));
+    assert.equal(read(`customer/settings/${name}.kql`), `${json(`settings/${name}.json`).KQL_BODY.value}\n`);
+    assert.deepEqual(delivered(`settings/${name}.csv-columns.json`),
+      json(`settings/${name}.json`).COLUMNS.value.map(column => ({
+        header: column, value: `@item()['${column.replaceAll("'", "''")}']`,
+      })));
   }
   const paths = ['infra', 'logicapp', 'settings', 'scripts'].flatMap(dir => files(resolve(root, dir)));
   assert(paths.every(path => !/app-ws|host\.json|connections\.json|\.ps1$|\.sh$|workflow\.json$|settings-/i.test(path)));
@@ -116,6 +131,12 @@ test('Consumption uses two V1 MI connections, system identity and disabled initi
   assert.deepEqual(template.parameters.columns.defaultValue, sample.COLUMNS.value);
   assert.equal(template.parameters.startTime.defaultValue, '2026-12-05T09:00:00');
   assert(workflow.properties.definition.includes("'startTime', parameters('startTime')"));
+  assert(workflow.properties.definition.includes("variables('csvColumns')"));
+  const csvColumns = template.variables.copy.find(copy => copy.name === 'csvColumns');
+  assert.equal(csvColumns.count, "[length(parameters('columns'))]");
+  assert.equal(csvColumns.input.header, "[parameters('columns')[copyIndex('csvColumns')]]");
+  assert.equal(csvColumns.input.value,
+    "[format('@item()[''{0}'']', replace(parameters('columns')[copyIndex('csvColumns')], '''', ''''''))]");
   assert.deepEqual(resolveVariable(template, template.variables.definition), definition);
 });
 
@@ -147,7 +168,7 @@ test('monthly trigger is anchored in JST, serialized, and has no unsupported mon
 test('parameters replace app settings and connectors use the Consumption $connections contract', () => {
   assert.deepEqual(Object.keys(definition.parameters).sort(),
     ['$connections', 'COLUMNS', 'KQL_BODY', 'LAW_RESOURCE_ID', 'MONTH_OVERRIDE', 'STORAGE_ACCOUNT_NAME'].sort());
-  for (const name of ['sample', 'azureactivity']) {
+  for (const name of settingNames) {
     const settings = json(`settings/${name}.json`);
     assert.deepEqual(Object.keys(settings).sort(), Object.keys(definition.parameters).filter(key => key !== '$connections').sort());
     for (const value of Object.values(settings)) assert.deepEqual(Object.keys(value), ['value']);
@@ -168,6 +189,82 @@ test('parameters replace app settings and connectors use the Consumption $connec
   }
 });
 
+test('customer KQL patterns keep the monthly window and match their documented output columns', () => {
+  const guide = read('customer/docs/query-patterns.md');
+  for (const name of settingNames.filter(name => name !== 'sample')) {
+    const settings = json(`settings/${name}.json`);
+    const kql = settings.KQL_BODY.value;
+    assert.equal(settings.MONTH_OVERRIDE.value, '');
+    assert(kql.startsWith('AzureActivity\n| where TimeGenerated >= start and TimeGenerated < end\n'));
+    assert(!/\b(?:ago|now|startofmonth)\s*\(|let\s+(?:start|end)\s*=/i.test(kql));
+    assert(kql.endsWith(`| project ${settings.COLUMNS.value.join(', ')}\n| project bag=pack_all()`));
+    assert(guide.includes(`../settings/${name}.kql`));
+    assert(guide.includes(`../settings/${name}.json`));
+    assert(guide.includes(`../settings/${name}.csv-columns.json`));
+    assert(guide.includes(JSON.stringify(settings.COLUMNS.value)));
+  }
+  assert(json('settings/azureactivity-failures.json').KQL_BODY.value.includes('| where ActivityStatusValue =~ "Failed"'));
+  assert(json('settings/azureactivity-summary.json').KQL_BODY.value.includes(
+    '| summarize RecordCount=count() by OperationNameValue, ActivityStatusValue'));
+});
+
+test('offline WDL harness accepts each pattern response shape and rejects stale columns', () => {
+  const fixtures = {
+    azureactivity: { TimeGenerated: '2026-01-15T03:04:05Z', OperationNameValue: 'sample/write', ActivityStatusValue: 'Succeeded', CategoryValue: 'Administrative' },
+    'azureactivity-failures': { TimeGenerated: '2026-01-15T03:04:05Z', OperationNameValue: 'sample/write', ActivityStatusValue: 'Failed', CategoryValue: 'Administrative' },
+    'azureactivity-summary': { OperationNameValue: 'sample/write', ActivityStatusValue: 'Succeeded', RecordCount: 4 },
+  };
+  for (const [name, bag] of Object.entries(fixtures)) {
+    const settings = json(`settings/${name}.json`);
+    const workflow = definitionForPattern(name);
+    for (const value of [[], [{ bag }]]) {
+      const result = runWorkflow(workflow, settings, {
+        now: '2026-02-05T00:00:00Z', queryResponse: { value },
+      });
+      assert.equal(result.status, 'Succeeded', result.error?.stack);
+      assert.equal(result.outputs.RowCount, value.length);
+      assert.equal(result.outputs.StartUtc, '2025-12-31T15:00:00');
+      assert.equal(result.outputs.EndUtc, '2026-01-31T15:00:00');
+      assert.equal(result.outputs.QueryText,
+        `let start=datetime(2025-12-31T15:00:00); let end=datetime(2026-01-31T15:00:00); ${settings.KQL_BODY.value}`);
+      const bytes = result.blobs.get('/exports/2026-01/runs/run-1/export.csv');
+      assert.equal(bytes.subarray(0, 3).toString('hex'), 'efbbbf');
+      assert(bytes.subarray(3).toString('utf8').startsWith(`${settings.COLUMNS.value.join(',')}\r\n`));
+      const manifest = JSON.parse(result.blobs.get('/exports/2026-01/runs/run-1/manifest.json'));
+      assert.equal(manifest.rowCount, value.length);
+      if (name.endsWith('summary') && value.length) {
+        assert(bytes.toString('utf8').includes('sample/write,Succeeded,4'));
+        assert.equal(manifest.rowCount, 1, 'rowCount counts CSV rows, not source logs');
+      }
+    }
+    settings.COLUMNS.value = sample.COLUMNS.value;
+    const invalid = runWorkflow(workflow, settings, { queryResponse: { value: [{ bag }] } });
+    assert.equal(invalid.status, 'Failed');
+    assert(!invalid.trace.includes('Upload_CSV'));
+  }
+});
+
+test('all patterns calculate 28/29/30/31-day previous months and year rollover without edits', () => {
+  const cases = [
+    ['2026-02-05T00:00:00Z', '2025-12-31T15:00:00', '2026-01-31T15:00:00', 31],
+    ['2026-03-05T00:00:00Z', '2026-01-31T15:00:00', '2026-02-28T15:00:00', 28],
+    ['2028-03-05T00:00:00Z', '2028-01-31T15:00:00', '2028-02-29T15:00:00', 29],
+    ['2026-05-05T00:00:00Z', '2026-03-31T15:00:00', '2026-04-30T15:00:00', 30],
+    ['2026-01-05T00:00:00Z', '2025-11-30T15:00:00', '2025-12-31T15:00:00', 31],
+  ];
+  for (const name of settingNames) {
+    const settings = json(`settings/${name}.json`);
+    settings.MONTH_OVERRIDE.value = '';
+    for (const [now, start, end, days] of cases) {
+      const result = runWorkflow(definitionForPattern(name), settings, { now, queryResponse: { value: [] } });
+      assert.equal(result.status, 'Succeeded', result.error?.stack);
+      assert.equal(result.outputs.StartUtc, start);
+      assert.equal(result.outputs.EndUtc, end);
+      assert.equal((Date.parse(`${end}Z`) - Date.parse(`${start}Z`)) / 86400000, days);
+    }
+  }
+});
+
 test('query shape, errors, row cap, bag schema and columns fail closed before upload', () => {
   assert.deepEqual(actions.Rows.inputs.schema.required, ['value']);
   assert.equal(actions.Rows.inputs.schema.properties.value.type, 'array');
@@ -176,12 +273,51 @@ test('query shape, errors, row cap, bag schema and columns fail closed before up
   assert.deepEqual(actions.Check_Row_Cap.expression, { and: [{ greaterOrEquals: ["@outputs('RowCount')", 500000] }] });
   assert.deepEqual(actions.Check_Record_Columns.inputs.schema.items, { type: 'object', required: "@outputs('Settings_Columns')" });
   assert.deepEqual(actions.Create_CSV_table.runAfter, { Check_Record_Columns: ['Succeeded'] });
+  assert.deepEqual(actions.Create_CSV_table.inputs.columns, delivered('settings/sample.csv-columns.json'));
   assert.deepEqual(actions.Upload_CSV.runAfter, { Check_Header: ['Succeeded'] });
   assert.deepEqual(definition.actions.Fail_if_Export_Failed.runAfter, { Export: ['Failed', 'TimedOut'] });
   const sequence = Object.entries(actions);
   for (let index = 0; index < sequence.length; index++) {
     assert.deepEqual(sequence[index][1].runAfter, index === 0 ? {} : { [sequence[index - 1][0]]: ['Succeeded'] },
       `${sequence[index][0]} must run only after its predecessor succeeded`);
+  }
+});
+
+test('CSV uses configured column order even when bag keys arrive in different orders', () => {
+  const result = runWorkflow(definition, sample, {
+    queryResponse: {
+      value: [
+        { bag: { Text: 'comma, quote " and 日本語', Id: 2, TimeGenerated: '2026-01-01T00:00:00Z' } },
+        { bag: JSON.stringify({ Id: 3, Extra: 'not exported', Text: 'line1\nline2', TimeGenerated: '2026-01-02T00:00:00Z' }) },
+      ],
+    },
+  });
+  assert.equal(result.status, 'Succeeded', result.error?.stack);
+  const bytes = result.blobs.get('/exports/2026-01/runs/run-1/export.csv');
+  assert.equal(bytes.subarray(0, 3).toString('hex'), 'efbbbf');
+  assert.equal(bytes.subarray(3).toString('utf8'),
+    'TimeGenerated,Id,Text\r\n2026-01-01T00:00:00Z,2,"comma, quote "" and 日本語"\r\n2026-01-02T00:00:00Z,3,"line1\nline2"\r\n');
+  assert.equal(result.outputs.Manifest.rowCount, 2);
+});
+
+test('each pattern exports values in its explicit column order, not input key order', () => {
+  for (const name of settingNames) {
+    const settings = json(`settings/${name}.json`);
+    const workflow = definitionForPattern(name);
+    const columns = settings.COLUMNS.value;
+    const bag = Object.fromEntries(columns.map((column, index) => [column, `value-${index}`]).reverse());
+    for (const month of ['2026-01', '2026-02']) {
+      settings.MONTH_OVERRIDE.value = month;
+      const result = runWorkflow(workflow, settings, { queryResponse: { value: [{ bag }] } });
+      assert.equal(result.status, 'Succeeded', result.error?.stack);
+      assert.equal(result.blobs.get(`/exports/${month}/runs/run-1/export.csv`).subarray(3).toString('utf8'),
+        `${columns.join(',')}\r\n${columns.map((_, index) => `value-${index}`).join(',')}\r\n`);
+    }
+    const mismatched = structuredClone(workflow);
+    mismatched.actions.Export.actions.Create_CSV_table.inputs.columns.reverse();
+    const invalid = runWorkflow(mismatched, settings, { queryResponse: { value: [{ bag }] } });
+    assert.equal(invalid.status, 'Failed');
+    assert(!invalid.trace.includes('Upload_CSV'));
   }
 });
 
@@ -273,7 +409,6 @@ test('offline failure injection leaves prior current unchanged until the final p
     { queryResponse: { value: [{ bag: null }] } },
     { queryResponse: { value: [{ bag: 'invalid json' }] } },
     { queryResponse: { value: [{ bag: { Wrong: 'column' } }] } },
-    { queryResponse: { value: [{ bag: { Text: 'wrong order', Id: 1, TimeGenerated: '2026-01-01' } }] } },
     { queryResponse: { value: Array.from({ length: 500000 }, () => ({ bag: {} })) } },
     { readBack: {} },
     { readBack: { $content: Buffer.from('wrong saved bytes').toString('base64') } },

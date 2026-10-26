@@ -8,7 +8,7 @@
     ]
   },
   "KQL_BODY": {
-    "value": "AzureActivity | where TimeGenerated >= start and TimeGenerated < end | project TimeGenerated, OperationNameValue, ActivityStatusValue, CategoryValue | project bag=pack_all()"
+    "value": "AzureActivity\n| where TimeGenerated >= start and TimeGenerated < end\n| project TimeGenerated, OperationNameValue, ActivityStatusValue, CategoryValue\n| project bag=pack_all()"
   },
   "MONTH_OVERRIDE": {
     "value": ""

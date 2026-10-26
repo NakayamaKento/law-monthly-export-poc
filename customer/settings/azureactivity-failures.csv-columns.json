@@ -1,0 +1,18 @@
+[
+  {
+    "header": "TimeGenerated",
+    "value": "@item()['TimeGenerated']"
+  },
+  {
+    "header": "OperationNameValue",
+    "value": "@item()['OperationNameValue']"
+  },
+  {
+    "header": "ActivityStatusValue",
+    "value": "@item()['ActivityStatusValue']"
+  },
+  {
+    "header": "CategoryValue",
+    "value": "@item()['CategoryValue']"
+  }
+]
