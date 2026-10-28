@@ -875,3 +875,11 @@ Public Disabled / Deny / AzureServices、キー・匿名無効、システムMI�
 提供者向けREADME・保守資料・CONTEXTに顧客共有の編集方針を反映した。回帰試験にcustomer外へのローカル参照・旧方式や提供者専用記録の混入防止と、貼り付け用ダミーKQLが正本と一致する検査を追加。KQLの整形用空白・改行だけを許容し、文字列値はそのまま比較する。
 
 最終検査は配布生成 `--check` 一致、関連試験23/23、顧客5文書の章リンク14件、ダミーKQL一致、`git diff --check` に成功した。実環境識別子・私有フォルダーID・検証専用アクションのリポジトリ検索も該当なし。前段で実装・実機確認済みのPerf例・複数KQL分離・新命名の未コミット変更も、現行資料と揃えて同じPRの対象とする。
+
+## 32. 顧客向け手順を既存 Log Analytics の利用へ変更（2026-10-28）
+
+第1段階のARMが評価用 Log Analytics workspace を新規作成し、第2・3段階も同じRG内の名前参照を前提にしていたため、顧客が既に保有する workspace を使う構成へ変更した。第1段階はStorageとexportsのみを作成し、第2段階へ既存 LAW の ARM リソース ID を指定する。LAW の設定・保持期間・ログデータは変更しない。
+
+Monitor Logs に必要な `LAW_RESOURCE_ID` は既存 ARM ID をそのまま使う。第3段階 ARM は Storage コンテナーの Blob Data Contributor のみを割り当てる。既存 LAW が別 RG にある場合にも対応できるよう、Log Analytics Reader は導入先が既存 LAW の IAM で対象 Logic App MI に付与する手順に分離し、対象スコープの権限と承認条件を記載した。顧客向け README・導入・KQL追加・受入・削除手順も既存 LAW の共有に合わせて更新した。
+
+配布ARMを再生成し、`node --test scripts/customer.test.mjs` **23/23成功**、`node scripts/build-customer.mjs --check`、`git diff --check` が成功。オフライン検査で第1段階に LAW リソースが含まれないこと、第2段階が `lawResourceId` を `LAW_RESOURCE_ID` に設定すること、第3段階が LAW ロールを作成しないことを確認した。Azure上の既存 LAW を使った実機デプロイ・IAM付与は行っておらず、導入先での受入確認が必要。

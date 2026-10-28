@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.41.2.15936",
-      "templateHash": "13519082922925400513"
+      "version": "0.48.1.52935",
+      "templateHash": "14501665735548306793"
     }
   },
   "parameters": {
@@ -21,19 +21,6 @@
       "metadata": {
         "description": "Lowercase letters and digits only, starting with a letter. Deploy into a NEW dedicated resource group."
       }
-    },
-    "retentionInDays": {
-      "type": "int",
-      "defaultValue": 90,
-      "allowedValues": [
-        30,
-        60,
-        90,
-        120,
-        180,
-        365,
-        730
-      ]
     }
   },
   "variables": {
@@ -90,34 +77,12 @@
       "dependsOn": [
         "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageName'), 'default')]"
       ]
-    },
-    {
-      "type": "Microsoft.OperationalInsights/workspaces",
-      "apiVersion": "2023-09-01",
-      "name": "[format('{0}-law', parameters('prefix'))]",
-      "location": "[parameters('location')]",
-      "properties": {
-        "sku": {
-          "name": "PerGB2018"
-        },
-        "retentionInDays": "[parameters('retentionInDays')]",
-        "publicNetworkAccessForQuery": "Enabled",
-        "publicNetworkAccessForIngestion": "Disabled"
-      }
     }
   ],
   "outputs": {
     "storageAccountName": {
       "type": "string",
       "value": "[variables('storageName')]"
-    },
-    "lawName": {
-      "type": "string",
-      "value": "[format('{0}-law', parameters('prefix'))]"
-    },
-    "lawResourceId": {
-      "type": "string",
-      "value": "[resourceId('Microsoft.OperationalInsights/workspaces', format('{0}-law', parameters('prefix')))]"
     },
     "exportsContainerResourceId": {
       "type": "string",

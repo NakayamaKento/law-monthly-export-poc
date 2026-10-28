@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.41.2.15936",
-      "templateHash": "7770605372456368012"
+      "version": "0.48.1.52935",
+      "templateHash": "3279250353908268172"
     }
   },
   "parameters": {
@@ -13,9 +13,6 @@
       "type": "string"
     },
     "storageAccountName": {
-      "type": "string"
-    },
-    "lawName": {
       "type": "string"
     }
   },
@@ -30,27 +27,12 @@
         "principalType": "ServicePrincipal",
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
       }
-    },
-    {
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
-      "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName'))]",
-      "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName')), resourceId('Microsoft.Logic/workflows', parameters('workflowName')), 'log-reader')]",
-      "properties": {
-        "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]",
-        "principalType": "ServicePrincipal",
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '73c42c96-874c-492b-b04d-ab87d138a893')]"
-      }
     }
   ],
   "outputs": {
     "blobRoleAssignmentId": {
       "type": "string",
       "value": "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', split(format('{0}/default/exports', parameters('storageAccountName')), '/')[0], split(format('{0}/default/exports', parameters('storageAccountName')), '/')[1], split(format('{0}/default/exports', parameters('storageAccountName')), '/')[2]), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', split(format('{0}/default/exports', parameters('storageAccountName')), '/')[0], split(format('{0}/default/exports', parameters('storageAccountName')), '/')[1], split(format('{0}/default/exports', parameters('storageAccountName')), '/')[2]), resourceId('Microsoft.Logic/workflows', parameters('workflowName')), 'blob-contributor'))]"
-    },
-    "lawRoleAssignmentId": {
-      "type": "string",
-      "value": "[extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName')), resourceId('Microsoft.Logic/workflows', parameters('workflowName')), 'log-reader'))]"
     }
   }
 }

@@ -11,8 +11,8 @@
     "storageAccountName": {
       "value": "<STORAGE_ACCOUNT_NAME>"
     },
-    "lawName": {
-      "value": "<LAW_NAME>"
+    "lawResourceId": {
+      "value": "<LAW_RESOURCE_ID>"
     },
     "startTime": {
       "value": "2026-12-05T09:00:00"

@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.41.2.15936",
-      "templateHash": "6707413194767790860"
+      "version": "0.48.1.52935",
+      "templateHash": "11490292494052005122"
     }
   },
   "parameters": {
@@ -23,7 +23,7 @@
     "storageAccountName": {
       "type": "string"
     },
-    "lawName": {
+    "lawResourceId": {
       "type": "string"
     },
     "startTime": {
@@ -786,7 +786,7 @@
             "value": "[parameters('monthOverride')]"
           },
           "LAW_RESOURCE_ID": {
-            "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName'))]"
+            "value": "[parameters('lawResourceId')]"
           },
           "STORAGE_ACCOUNT_NAME": {
             "value": "[parameters('storageAccountName')]"

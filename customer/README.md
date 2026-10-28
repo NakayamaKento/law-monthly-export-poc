@@ -1,6 +1,6 @@
 # Log Analytics 月次 CSV エクスポート：Consumption 評価用サンプル
 
-Logic Apps **Consumption（従量課金）**で前月のログを日本時間の暦月で抽出し、Storage の `exports` コンテナーに UTF-8 BOM 付き CSV を保存します。ログ取得と Blob 保存は**管理コネクタ＋システム割り当てマネージド ID（MI）**、期間計算・検証・CSV 変換は組み込みアクションです。HTTP による REST API の直書き、共有キー、SAS、ユーザーの接続資格情報は使いません。
+Logic Apps **Consumption（従量課金）**で既存 Log Analytics workspace の前月ログを日本時間の暦月で抽出し、Storage の `exports` コンテナーに UTF-8 BOM 付き CSV を保存します。ログ取得と Blob 保存は**管理コネクタ＋システム割り当てマネージド ID（MI）**、期間計算・検証・CSV 変換は組み込みアクションです。HTTP による REST API の直書き、共有キー、SAS、ユーザーの接続資格情報は使いません。
 
 ## 本サンプルの使い方
 
@@ -21,9 +21,9 @@ Storage は初回から **Public network access: Disabled / Deny / AzureServices
 
 | 配布資材 | 用途 |
 |---|---|
-| [基盤 ARM](infra/01-foundation.json) / [入力例](infra/01-foundation.parameters.json) | 保存用 Storage、exports、評価用 LAW |
+| [基盤 ARM](infra/01-foundation.json) / [入力例](infra/01-foundation.parameters.json) | 保存用 Storage、exports |
 | [ワークフロー ARM](infra/02-workflow.json) / [入力例](infra/02-workflow.parameters.json) | 無効状態の Consumption と MI 管理接続 2 個 |
-| [権限 ARM](infra/03-access.json) / [入力例](infra/03-access.parameters.json) | アプリ MI の Blob / LAW ロール |
+| [権限 ARM](infra/03-access.json) / [入力例](infra/03-access.parameters.json) | アプリ MI の Storage Blob Data Contributor。既存 LAW の Log Analytics Reader は portal で付与 |
 | [ワークフロー定義](logicapp/monthly-export/definition.json) | 定義の参照用。初回構築と接続設定はARMを使用 |
 | [ダミー設定](settings/sample.json) / [明細](settings/azureactivity.json) / [失敗のみ](settings/azureactivity-failures.json) / [操作別集計](settings/azureactivity-summary.json) / [Perf 日次CPU平均](settings/perf-cpu-daily.json) | KQL・列・対象月の設定例。各設定に同名の貼り付け用 `.kql` を同梱 |
 
@@ -52,10 +52,10 @@ flowchart LR
 | Logic App Consumption | KQLごとに1個。各々の月次 Recurrence と実行履歴、システム MI |
 | 保存用 Storage / exports | アカウント 1 個、コンテナー 1 個 |
 | 管理 API 接続 | ワークフローごとに2個。Monitor Logs と Blob |
-| Log Analytics Workspace（LAW） | 1 個。本一式は隔離した評価用を作成 |
+| Log Analytics Workspace（LAW） | 顧客が選定した既存の workspace を使用。本一式では作成・変更しない |
 | アプリ MI のデータ権限 | ワークフローごとのMIにLAWのLog Analytics Reader、exportsのStorage Blob Data Contributor |
 
-本一式は専用RGに評価用LAWを作成します。本番の取得元・権限・接続設定は別途確認し、評価用LAWを無断で置換しません。
+既存 LAW の ARM リソース ID をワークフローへ指定します。既存 workspace の設定・データ・保持期間は変更しません。対象 LAW の選定、クエリ可否、MI の Reader 権限を確認してから導入してください。
 
 ## 設計上の制限
 

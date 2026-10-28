@@ -7,9 +7,6 @@
     },
     "storageAccountName": {
       "value": "<STORAGE_ACCOUNT_NAME>"
-    },
-    "lawName": {
-      "value": "<LAW_NAME>"
     }
   }
 }
