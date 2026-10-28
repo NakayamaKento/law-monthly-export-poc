@@ -7,9 +7,6 @@
     },
     "prefix": {
       "value": "lawexp"
-    },
-    "retentionInDays": {
-      "value": 90
     }
   }
 }

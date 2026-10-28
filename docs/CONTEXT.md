@@ -27,12 +27,14 @@ Azure Log Analytics の前月ログを毎月 5 日 09:00 JST に抽出し、CSV 
 | Consumption ワークフロー KQLごとに1 | システム MI、初期 Disabled、Recurrence、履歴 |
 | 保存用 Storage 1 / exports 1 | CSV / manifest / current。ホスト用途なし |
 | 管理 API 接続 ワークフローごとに2 | Monitor Logs と Blob。双方 MI、Consumption 用 V1 |
-| 評価用 LAW 1 | ダミー KQL 実行。ログ取り込み不要 |
+| 顧客が選定した既存 LAW | ダミー KQL 実行にも使用。今回の ARM では作成・変更しない |
 | アプリ MI のロール ワークフローごとに2 | LAW Reader、exports の Blob Data Contributor |
 
 WS1 / App Service プラン、ホスト UAMI、ホスト用 Queue / Table、実行用 VNet / PE / DNS、Files、AMPLS、ASE、VM / Bastion / NAT は作らない。CSV 取得用の既存ネットワークは別条件として扱い、この削減を理由に削除しない。
 
 Consumption の Blob は**管理コネクタ**。期間計算・CSV・条件・Parse JSON は組み込み。HTTP による REST の直書きなし。`appsetting()` ではなくワークフローパラメーターを使う。
+
+顧客向け ARM は新規 LAW を作成しない。第2段階に既存 LAW の ARM リソース ID を指定し、第3段階の ARM で Storage のロールを割り当てる。既存 LAW の Log Analytics Reader は顧客が portal の LAW IAM でワークフローごとに付与し、既存 workspace の設定・保持・データは変更しない。
 
 2026-10-25 に [KQL パターンの変更ガイド](../customer/docs/query-patterns.md)と明細・失敗のみ・操作別集計の設定例、貼り付け用 `.kql` の生成を追加。当時は1ワークフロー内の切り替えだけで保存先分離は未実装だった。顧客は `KQL_BODY` と `COLUMNS` を対で変更し、通常の `MONTH_OVERRIDE=""` による前月計算は共通で使う。
 

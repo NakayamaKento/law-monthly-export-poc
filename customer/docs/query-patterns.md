@@ -186,7 +186,7 @@ datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterNa
 
 ## 5. 複数KQLを1つのStorage Accountへ保存する
 
-**1ワークフロー1KQL、1実行1CSV** とし、KQLごとに月次実行を有効にします。基盤は共有し、KQLごとにワークフロー、システムMI、管理接続2個、ロール割り当て2個を用意します。すべてのワークフローで同じ Storage Account 名とLAW名を指定します。
+**1ワークフロー1KQL、1実行1CSV** とし、KQLごとに月次実行を有効にします。基盤は共有し、KQLごとにワークフロー、システムMI、管理接続2個、ロール割り当て2個を用意します。すべてのワークフローで同じ Storage Account 名と既存 LAW の ARM リソース ID を指定します。
 
 | KQLの例 | workflowName の例 | 同じ exports 内の current |
 |---|---|---|
@@ -240,7 +240,7 @@ datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterNa
 | 試験対象月 | `monthOverride` | `MONTH_OVERRIDE` | 試験は `2026-01`、通常運用は空文字 |
 | 初回の実行予定 | `startTime` | Recurrenceの開始日時 | 承認済みの将来の5日09:00 JST。Zや時差を末尾に付けない |
 | 共通の保存先 | `storageAccountName` | `STORAGE_ACCOUNT_NAME` | 第1段階のStorage名をそのまま使う |
-| 共通の取得元 | `lawName` | `LAW_RESOURCE_ID` はARMが設定 | 第1段階のLAW名をそのまま使う |
+| 共通の取得元 | `lawResourceId` | `LAW_RESOURCE_ID` はARMが設定 | 承認済み既存 LAW の ARM リソース ID |
 
 用途名は英小文字・数字・ハイフンで内容が分かる名前を推奨します。アカウント内で重複しない名前を台帳で確認し、機密情報は名前に入れません。列が同じなら既存の `.csv-columns.json` を再利用できます。列が異なる場合、新規ARM入力の `columns` からカスタム列も生成されます。作成後に列を変える場合だけ、§4に従いカスタム列も変更します。
 
@@ -261,10 +261,10 @@ CSV名は自動で `lawexp-perf-memory_<対象月>_<実行日時JST>.csv`、curr
 
 ### portalでKQLを追加する
 
-1. [導入手順](setup.md)の第1段階は **1回だけ**実施し、共通の Storage Account・exports・評価用LAWを作る。2本目以降で第1段階を繰り返したり、別のStorage Accountを作ったりしない。
+1. [導入手順](setup.md)の第1段階は **1回だけ**実施し、共通の Storage Account・exportsを作る。承認済みの既存 LAW を全ワークフローで共用する。2本目以降で第1段階を繰り返したり、別のStorage Accountを作ったりしない。
 2. 業務KQLごとに用途を表す `workflowName` を決め、**同じStorage Accountを使う全ワークフローで一意**にする。例の名前は説明用。別RGでも同じ名前を再利用しない。同じ名前で第2段階を再デプロイすると既存ワークフローを上書きするため、追加時は必ず新しい名前にする。
-3. 同じRG・リージョンで第2段階 `02-workflow.json` をデプロイする。`storageAccountName` / `lawName` は共通基盤の値を転記し、上表の `workflowName`・`kqlBody`・`columns`・`monthOverride`・`startTime` を追加KQLの内容に合わせる。初回は既存のダミー設定で接続を確認してよい。初回のカスタム列は `columns` から生成される。
-4. 各ワークフローについて第3段階 `03-access.json` を実施する。`workflowName` は今回の名前、Storage / LAW は共通の名前を指定する。MIごとに権限を確認する。1本目のMIへの権限だけでは2本目は認可されない。
+3. 同じRG・リージョンで第2段階 `02-workflow.json` をデプロイする。`storageAccountName` / `lawResourceId` は共通の値を転記し、上表の `workflowName`・`kqlBody`・`columns`・`monthOverride`・`startTime` を追加KQLの内容に合わせる。初回は既存のダミー設定で接続を確認してよい。初回のカスタム列は `columns` から生成される。
+4. 各ワークフローについて第3段階 `03-access.json` を実施し、既存 LAW の IAM で今回の Logic App MI に Log Analytics Reader を個別に付与する。Storage / LAW は共通でもMIごとに権限が必要です。1本目のMIへの権限だけでは2本目は認可されません。
 5. 無効状態で、[§4の変更手順](#4-portal-で切り替える)に従い、そのワークフロー専用のKQL・列へ変更して Publish。ダミーからPerfへ変更する場合は§3.1の4列も反映する。`$connections` はそのワークフロー自身の接続参照を保持し、1本目から流用しない。
 6. KQLごとに手動試験し、`OutputNames` と保存済みCSVの用途名・対象月・JST日時、manifestのfiles、currentのpath/csvFileNameを確認する。他KQLのcurrentが変わらないことも確認する。実行内の保存・読み戻しと、承認済み経路からの独立取得は区別する。
 7. 合格したワークフローごとに本番KQL、空の `MONTH_OVERRIDE`、承認した開始日時・次回予定を確認して有効化する。すべてのワークフローを毎月手動で切り替える必要はない。監視・再実行もKQLごとに行う。

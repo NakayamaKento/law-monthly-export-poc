@@ -83,7 +83,6 @@ test('delivery contains only the three self-contained Consumption stages and can
     'Microsoft.Storage/storageAccounts',
     'Microsoft.Storage/storageAccounts/blobServices',
     'Microsoft.Storage/storageAccounts/blobServices/containers',
-    'Microsoft.OperationalInsights/workspaces',
     'Microsoft.Logic/workflows',
     'Microsoft.Web/connections',
     'Microsoft.Authorization/roleAssignments',
@@ -91,8 +90,9 @@ test('delivery contains only the three self-contained Consumption stages and can
 });
 
 test('foundation starts keyless and public-disabled with only a trusted-service exception', () => {
-  const { resources } = delivered('infra/01-foundation.json');
-  assert.equal(resources.length, 4);
+  const foundation = delivered('infra/01-foundation.json');
+  const { resources } = foundation;
+  assert.equal(resources.length, 3);
   const storage = resources.filter(resource => resource.type === 'Microsoft.Storage/storageAccounts');
   assert.equal(storage.length, 1);
   const properties = storage[0].properties;
@@ -107,14 +107,15 @@ test('foundation starts keyless and public-disabled with only a trusted-service 
   const container = resources.find(resource => resource.type.endsWith('/containers'));
   assert.equal(container.properties.publicAccess, 'None');
   assert(container.name.includes('exports'));
-  const law = resources.find(resource => resource.type === 'Microsoft.OperationalInsights/workspaces');
-  assert.equal(law.properties.publicNetworkAccessForQuery, 'Enabled');
-  assert.equal(law.properties.publicNetworkAccessForIngestion, 'Disabled');
-  assert.equal(delivered('infra/01-foundation.parameters.json').parameters.retentionInDays.value, 90);
+  assert(!resources.some(resource => resource.type === 'Microsoft.OperationalInsights/workspaces'));
+  assert(!('retentionInDays' in foundation.parameters));
 });
 
 test('Consumption uses two V1 MI connections, system identity and disabled initial workflow', () => {
   const template = delivered('infra/02-workflow.json');
+  assert(template.parameters.lawResourceId);
+  assert(!template.parameters.lawName);
+  assert.equal(delivered('infra/02-workflow.parameters.json').parameters.lawResourceId.value, '<LAW_RESOURCE_ID>');
   const connections = template.resources.filter(resource => resource.type === 'Microsoft.Web/connections');
   assert.equal(connections.length, 2);
   for (const connection of connections) {
@@ -129,6 +130,7 @@ test('Consumption uses two V1 MI connections, system identity and disabled initi
   const workflow = template.resources.find(resource => resource.type === 'Microsoft.Logic/workflows');
   assert.deepEqual(workflow.identity, { type: 'SystemAssigned' });
   assert.equal(workflow.properties.state, 'Disabled');
+  assert.equal(workflow.properties.parameters.LAW_RESOURCE_ID.value, "[parameters('lawResourceId')]");
   const params = workflow.properties.parameters;
   assert.deepEqual(Object.keys(params).sort(), Object.keys(definition.parameters).sort());
   for (const name of ['azuremonitorlogs', 'azureblob']) {
@@ -151,9 +153,10 @@ test('Consumption uses two V1 MI connections, system identity and disabled initi
   assert.deepEqual(resolveVariable(template, template.variables.definition), definition);
 });
 
-test('access stage grants only container Blob Data Contributor and workspace Log Analytics Reader', () => {
+test('access stage grants only container Blob Data Contributor', () => {
   const template = delivered('infra/03-access.json');
-  assert.equal(template.resources.length, 2);
+  assert.equal(template.resources.length, 1);
+  assert(!template.parameters.lawName);
   for (const role of template.resources) {
     assert.equal(role.type, 'Microsoft.Authorization/roleAssignments');
     assert.equal(role.properties.principalType, 'ServicePrincipal');
@@ -161,10 +164,11 @@ test('access stage grants only container Blob Data Contributor and workspace Log
     assert(role.properties.principalId.endsWith('.identity.principalId]'));
   }
   const blob = template.resources.find(resource => resource.properties.roleDefinitionId.includes('ba92f5b4-2d11-453d-a403-e96b0029c9fe'));
-  const law = template.resources.find(resource => resource.properties.roleDefinitionId.includes('73c42c96-874c-492b-b04d-ab87d138a893'));
   assert(blob.scope.includes("Microsoft.Storage/storageAccounts/blobServices/containers"));
   assert(blob.scope.includes('exports'));
-  assert(law.scope.includes('Microsoft.OperationalInsights/workspaces'));
+  assert(!template.resources.some(resource =>
+    resource.properties.roleDefinitionId.includes('73c42c96-874c-492b-b04d-ab87d138a893')));
+  assert(read('customer/docs/setup.md').includes('Log Analytics Reader'));
 });
 
 test('monthly trigger is anchored in JST, serialized, and has no unsupported monthly time schedule', () => {

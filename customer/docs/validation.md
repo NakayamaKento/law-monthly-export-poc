@@ -14,7 +14,7 @@
 | PerfダミーのUTC日次平均20 / 50、固定4列 | [Perfのダミー試験](query-patterns.md#32-perf-の実データがない場合の試験)で本文と列を確認 |
 | 実データの抽出・集計、本番量、実月次、操作者による独立CSV取得は未確認 | 本番利用前に業務KQL・予定・取得経路を受入確認 |
 
-**前提**：[導入手順](setup.md)の3段階を完了し、システムMI・管理接続2個・RBACが反映済みであること。StorageはPublic Disabled / Deny / AzureServices、共有キー・匿名アクセス無効を維持します。接続や保存に失敗しても、Public有効化・キー認証へ切り替えません。
+**前提**：[導入手順](setup.md)の3段階を完了し、承認済み既存 LAW の ARM リソース ID、システムMI・管理接続2個・LAW / Storage の RBACが反映済みであること。StorageはPublic Disabled / Deny / AzureServices、共有キー・匿名アクセス無効を維持します。接続や保存に失敗しても、Public有効化・キー認証へ切り替えません。
 
 ## 2. 実データ不要のダミーテスト
 
