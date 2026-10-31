@@ -875,3 +875,187 @@ Public Disabled / Deny / AzureServices、キー・匿名無効、システムMI�
 提供者向けREADME・保守資料・CONTEXTに顧客共有の編集方針を反映した。回帰試験にcustomer外へのローカル参照・旧方式や提供者専用記録の混入防止と、貼り付け用ダミーKQLが正本と一致する検査を追加。KQLの整形用空白・改行だけを許容し、文字列値はそのまま比較する。
 
 最終検査は配布生成 `--check` 一致、関連試験23/23、顧客5文書の章リンク14件、ダミーKQL一致、`git diff --check` に成功した。実環境識別子・私有フォルダーID・検証専用アクションのリポジトリ検索も該当なし。前段で実装・実機確認済みのPerf例・複数KQL分離・新命名の未コミット変更も、現行資料と揃えて同じPRの対象とする。
+
+## 32. Perf日次CPU平均への置換手順を確認（2026-10-30）
+
+顧客向け手順をPerfの日次CPU平均へ置き換えた場合について確認した。§30の専用環境は削除済みのため、新規専用RGにStorage 1・LAW 1・Consumption 1・MI管理接続2・限定ロール2を作成し、portalで試験・画像保存後に削除する承認を求めたが、ユーザー不在で回答を得られなかった。無回答を承認とみなさず、今回Azure資源の作成・変更・実行・削除は行っていない。
+
+### 手順の修正
+
+KQL変更手順から共通の受入確認へ進むと、3列ダミーの設定AでKQL・COLUMNSを戻してしまい、期待値も4件と取り違える余地があった。Perfの§3.2に、Disabled・Runningなし → KQL / COLUMNS / カスタム列 / 対象月 → Publish・再表示 → 有効化・1回実行 → Perf専用の期待値 → 0件 → 列不整合・正常復元 → 本番Perf本文と空の対象月への復元を明記した。
+
+ダミーKQLはdatatableだけでなくフィルター・集計・project・bagまで全文を掲載する。共通ダミーテストには「3列用」と明記し、Perfからは共通のBの1～3だけを参照する。固定4列と平均20 / 50の2行、UTC月境界、rowCountは元4件でなく集計後2行であることを照合する。顧客向けには検討・検証の履歴を追加していない。
+
+### オフラインで確認したこと
+
+資料の§3.1からCOLUMNSとカスタム列、§3.2からダミーKQLを取り出して正本との整合を検査した。datatableの4レコードと、カウンター条件・日次平均・列・bagへの受け渡しが正本のPerf本文と同じであることを静的に確認した。Microsoft LearnのCSVカスタム列・ヘッダーの仕様も参照した。
+
+WDLハーネスには既知のクエリ結果を注入し、次を検査した。**KQLエンジンによる実行・集計結果の新たな実証ではない。**
+
+| 手順 | オフラインの結果 |
+|---|---|
+| パラメーターだけ4列にし、カスタム列を3列のまま残す | Failed、current更新なし |
+| 本文・COLUMNS・カスタム列をPerfダミーへ変更 | 2行・187 bytes、4列と平均20 / 50の期待CSVに一致、manifest / currentが整合 |
+| MONTH_OVERRIDEだけ2025-11へ変更 | 0行・55 bytes、BOM＋4列ヘッダー＋CRLF、1月currentを保持 |
+| COLUMNSは正しいままカスタム列だけ逆順 | Failed、Upload CSV / Currentへ進まず、1月currentを保持 |
+| 正しいカスタム列へ復元 | 2行の新runで成功、旧CSVも保持 |
+| 本文をPerf、対象月を空へ復元 | 前月計算・実行KQL・4列の出力契約が整合。実Perfの応答は検証していない |
+
+関連試験24/24、配布生成 `--check` 一致、顧客5文書の章リンク19件、`git diff --check` を確認した。初回の追加テストではMarkdownのCRLFと設定JSON内KQLのLFの差で比較が失敗したため、試験側で改行を正規化して再実行した。ワークフロー正本・配布実装は変更していない。
+
+今回のAzureでの手順トレース・スクリーンショット取得と、本番Perfデータ・独立CSV取得は未実施。§30の過去の実機確認を今回の実施結果とは扱わない。
+
+### 既存の実機証拠との追加照合
+
+修正後の顧客ガイドからダミーKQLを抽出し、2026-10-27に公開した実リソースJSONのKQL・COLUMNS・カスタム列と照合した。文字列値を保持して整形用空白を除くと、KQLの差は実測時だけに追加した `order by TimeGenerated asc` のみだった。現行手順は行順を保証せず、日時・リソース・コンピューターで照合するため、抽出・集計・列の相違はない。
+
+同日のPerf正常復元ケースの実行内Blob読み戻しbase64と保全CSVが全バイト一致し、現行の期待値と同じ4列・2行・187 bytes・平均20 / 50であることを再照合した。0件CSVもBOM＋4列ヘッダー＋CRLFの55 bytesと一致。manifestの数値rowCount=2、csvReadBackVerified=true、開始UTCから計算したJST日時付きファイル名も整合した。実ID・生ログは非公開のままである。
+
+これにより、今回の手順・配布設定・オフライン回帰検査に加え、入力と保存結果が既存のAzure実測証拠に整合することを確認した。追加照合は既存証拠の読み取りであり、新しいAzure実行や新しいスクリーンショットではない。
+
+## 33. Perf置換手順のPortal実測とNW変更後の独立確認（2026-10-31 JST）
+
+§32の後、ユーザーから「実際のAzure環境で、ブラウザーからAzure Portalに入って実施」と明示依頼を受け、新規の専用RGで顧客向け手順をトレースした。Azureの構築・設定変更・実行・閲覧はPortal UIだけで行い、CLI / REST / Cloud Shellへ切り替えていない。ローカルコマンドは提供者側の配布検査・UI証拠の保全・CSVバイト照合にだけ使用した。以下の時刻はすべてJSTで、UTCでは前日となる。
+
+### 構成と初期条件
+
+Southeast Asiaの専用RGにStorage 1・LAW 1・Consumption 1・管理接続2を3段階ARMで構築し、各デプロイSucceededを確認した。ワークフローはシステムMI、接続はConsumption用V1 / managedIdentityAuth / Ready。LAW限定のLog Analytics Readerとexports限定のStorage Blob Data Contributorの割り当て先をMIと照合した。
+
+初期Storage実体はPNA Disabled / Deny / AzureServices、Shared Key false、匿名false、IPルールなし。LAWは公開クエリEnabled・取り込みDisabled。Recurrenceは将来の毎月5日09:00 JST、同時実行数1、初期Disabledを確認した。実ID・ユーザー情報・生JSON・画像は非公開フォルダーだけに保全する。
+
+### 顧客手順の実行結果
+
+| JST開始 | ケース | 実測結果 |
+|---|---|---|
+| 00:08:39 | 初期3列ダミー | QueryでHTTP403 / InsufficientAccessError。ロールと対象スコープを再確認し、制限を変更せず反映待ち |
+| 00:17:15 | 反映待ち後の3列ダミー | Succeeded、4行 |
+| 00:22:44 | Perf全文ダミー・正しい4列・2026-01 | Succeeded、2行、平均20 / 50、187 bytes |
+| 00:31:14 | 対象月だけ2025-11 | Succeeded、0行、BOM＋4列ヘッダー＋CRLFの55 bytes |
+| 00:34:36 | 対象月を1月へ戻し、カスタム列だけ逆順 | Failed、SchemaMismatch、CSV header differs from expected columns。Upload CSV / Upload Currentともスキップ |
+| 00:38:24 | カスタム列を正順へ復元 | Succeeded、2行・187 bytes。最初のPerf CSVと全バイト一致 |
+
+全6run完了、成功4・想定列不整合1・初期403失敗1。PerfのCOLUMNSは `["TimeGenerated","_ResourceId","Computer","AvgCounterValue"]`、manifestのrowCountは元の4レコードでなく集計後の数値2 / 0、csvReadBackVerifiedはtrueだった。正常CSVはUTF-8 BOM・CRLFを含めて187 bytes、0件CSVは55 bytesを実バイト照合した。期間はJST暦月、日次binはUTCのままである。
+
+### Portalの操作差異と手順への反映
+
+- パラメーターパネルでActual valueが編集不可の場合があった。Default valueだけの編集で代替せず、コードビューで外側の `parameters.<名前>.value` を変更するよう顧客手順を補足した。
+- KQLの本文だけでコード全体を置換しない。未公開の不正JSONが残った場面は、その編集セッションだけをDiscardして公開済み版を保持し、以後は対象の値・配列だけを編集した。公開完了はDraftの自動保存でなく成功通知と再表示で確認した。
+- 最後に本番Perf全文・4列・空月へ戻してPublishした。Portalで外側MONTH_OVERRIDEが省略されたため、definition側のdefaultValueが空で非空の設定値が残っていないことを公開実体で確認した。[公式のパラメーター仕様](https://learn.microsoft.com/en-us/azure/logic-apps/workflow-definition-language-schema#parameters)の既定値適用と整合する確認方法をsetupへ補足した。
+- デザイナーで空のtimerangeが省略されたため、`timerangetype="3"` と `timerange={}` を戻して再公開。最終Query入力、MI、接続の実値、予定、同時実行数を初期実体と構造比較した。接続オブジェクトのキー順や外側type注釈の差を設定変更と誤認しない。
+
+本番Perfの実データは受入していないため実行せず、Disabledを維持した。NW変更後の独立確認の最後にも、同じ6runだけでRunningなしを再確認した。
+
+### ユーザーによるNW変更と独立取得の条件
+
+最後のStorage実体が初期値と異なったため、追加実行・削除を一旦止めてPortalのActivity Logと変更履歴を保全した。その後ユーザーが「Storage AccountのNW設定を変更した」と申告した。
+
+- 00:32:56：IP許可を追加。ただし変更履歴の新旧スナップショットは**両方ともPNA Disabled**。
+- 00:45:26：PNAがDisabledからEnabledへ変更。最後のrun 00:38:24より後である。
+- 変更後もDeny / AzureServices、Shared Key false、匿名falseは維持。エージェントは公開やキー認証による回避を行っていない。
+
+ユーザーの依頼に従い、変更後のPortalストレージブラウザーで**Microsoft Entraユーザーアカウント**認証を使用し、保存済み実体を独立確認した。アクセスキーへの切替、SAS生成、Blobの編集・保存はしていない。
+
+| 独立確認対象 | 結果 |
+|---|---|
+| 1月current → manifest → CSV | 正常復元run・path・CSV名が相互一致。数値rowCount=2、readback=true、4列・平均20 / 50、Portalサイズ187 B |
+| ローカルに保存済みの同名CSV | 187 bytes・UTF-8 BOM・CRLF。ワークフローが読み戻したBlobと全バイト一致 |
+| 2025-11のcurrent → manifest → CSV | 対応run・ファイル名一致、数値0、55 B、4列ヘッダーだけ |
+| 1月runsと旧Perf CSV | 成功した3つのrunフォルダーを保持、列不整合runの出力フォルダーなし。旧Perf CSVも4列・2行・平均20 / 50のまま |
+
+自動ダウンロード操作ではブラウザーのdownloadイベントを捕捉できなかったため、その操作自体の成功は主張しない。ローカルの同名CSVは00:46:23に保存済みで、実ファイルを直接照合した結果として扱う。
+
+**独立閲覧・ローカルCSVの取得はPublic Enabled・IP許可後の条件であり、PNA Disabledのまま通常端末から取得できた実証ではない。** ワークフロー実行時の条件と操作者の取得時の条件を混同せず、ユーザーの今回のNW変更を顧客の標準手順へ取り込まない。本番Perfデータ・本番量・実月次・顧客の承認済み閉域取得経路は引き続き未確認である。
+
+### 証跡と後片付け
+
+各run・公開実体・NW変更履歴・独立閲覧・削除の画像63枚と、JSON / CSV / バイト照合結果・検証レポートを非公開フォルダーに保全した。後片付けは今回専用RGの5資源だけを対象とし、RG外の今回作成物はない。削除前の資源名を照合し、Portalの新しい閲覧表示のツールバー「その他」からRG削除を実施した。プレビュー設定の変更は不要だった。削除成功通知と、元RG URLをページ全体から再読み込みした「リソースが見つかりませんでした」・状態コード404を確認し、専用RGの削除を完了した。既存RG・既存資源は変更していない。
+
+提供者側の最終検査は、関連試験24/24、配布生成 `--check` 一致、ドキュメントのローカルリンク解決、`git diff --check` に成功した。顧客手順には今回の検討・失敗履歴・NW変更を追加せず、実際に必要だったコードビューでの設定値変更と空月の公開後確認だけを反映した。コミット・PR・pushはこの追加依頼では行っていない。
+
+## 34. 手作業検証中の既存環境でCSV作成失敗を診断（2026-10-31 JST）
+
+ユーザー指定の別の既存RGについて、Portalで実行履歴・アクション入出力・Code preview・公開済みResource JSONを読み取り確認した。§33の今回専用環境ではなく、ユーザーが継続使用している環境として扱い、設定変更・Publish・有効／無効切替・再実行・削除は行っていない。
+
+対象は00:50:37開始のFailed実行。`Create_CSV_table` がInvalidTemplateとなり、`item()['Id']` を評価できないと記録されていた。入力で使用可能なプロパティは `TimeGenerated, _ResourceId, Computer, AvgCounterValue` の4つだった。
+
+| 確認対象 | 実体 |
+|---|---|
+| CSVアクションへの入力 | Perf用の4列 |
+| 失敗実行のCSV Code preview | TimeGenerated / Id / Textの旧3列 |
+| 公開済みKQL・COLUMNS | Perfの本文・4列へ変更済み |
+| 公開済みCreate_CSV_table.inputs.columns | 旧3列のまま |
+| Upload CSV / Upload Current | 両方ともスキップ、入力・出力なし |
+| 現在の運用設定 | Enabled、MONTH_OVERRIDEは2026-10。読み取りだけで維持 |
+
+原因は、パラメーター変更とは別に必要なCSVカスタム列の更新漏れ。保存先Storageへのアクセス失敗ではなく、その前の組み込みCSV変換で停止した。正しい修正箇所は `definition.actions.Export.actions.Create_CSV_table.inputs.columns` で、`customer/settings/perf-cpu-daily.csv-columns.json` の4列配列を使用する。他の入力・runAfter・接続・対象月は、この問題の回避目的で変更しない。
+
+Microsoft Learnの[CSVカスタム列の仕様](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-perform-data-operations#create-csv-table-action)を再確認。既存の顧客手順§3.1 / §4に修正箇所は記載済みだったため、§3.1へ「Idが存在しないInvalidTemplateなら旧3列の残存を確認」という具体的な診断を補足した。顧客資料には今回の環境名・実データ・実行履歴を追加していない。
+
+実行履歴・エラー・旧3列・後続スキップ・公開済み旧列／Perfパラメーターの画像7枚と診断結果を非公開保全した。保存済みcurrentの独立再取得はしておらず、確認範囲はこのrunのUpload Currentが未実行だったことまで。修正・修正後の再実行成功はこの読み取り診断では未実施である。
+
+## 35. 既存環境のCSV列修正とPortal実行・保存確認（2026-10-31 JST）
+
+§34の診断後、ユーザーから修正と検証の依頼を受け、同じ既存環境で実施した。Azure操作はすべてPortal UIから行い、CLI / REST / Cloud Shellには切り替えていない。§33の削除済み専用環境とは別であり、今回は既存RGと資源を保持する。
+
+### 修正範囲と公開実体の照合
+
+公開済みResource JSONと既存ドラフトの全文を非公開保全し、Runningなしと元のEnabled・対象月2026-10・将来開始日時を確認。一時Disabledとして、`definition.actions.Export.actions.Create_CSV_table.inputs.columns` の旧3列だけを `customer/settings/perf-cpu-daily.csv-columns.json` の4列配列へ変更した。ドラフト全文の構造比較で変更範囲を確認してからPublishし、Portalの公開成功通知と公開済みResource JSONで反映を確認した。
+
+元のEnabledへ戻した後も公開済み実体を再取得した。CSV列配列とサーバー側の `changedTime` / `version` だけを置き換えた修正前Resource JSONと、最終Resource JSON全体が厳密一致した。KQL・実効COLUMNS・対象LAW・対象月・接続・トリガー・同時実行・MI・タグ・リージョンなどを変更していない。配布正本は元から正しいため、ワークフロー実装の変更は不要だった。
+
+### 実行と保存済み実体
+
+実行前にPortalのEntraユーザー認証でStorageを閲覧し、10月フォルダーがまだなく、既存1月currentとCSVがあることを確認・保全した。通常のRunを1回だけ送信し、Run draft / Resubmitや追加試行は行っていない。
+
+| 確認対象 | 結果 |
+|---|---|
+| 実行履歴 | 01:28:37 JST開始、Succeeded、3.88秒 |
+| CSVカスタム列 | TimeGenerated / _ResourceId / Computer / AvgCounterValueの固定4列 |
+| 保存済みCSV | 5行、1119 bytes、UTF-8 BOM、CRLF |
+| 同一runのRecordsとの比較 | 全4列・全5行をCSV規則で再構成し、Blob読み戻し実体と全バイト一致 |
+| Read_Back_CSV / manifest | HTTP 200、rowCount=5、csvReadBackVerified=true |
+| 独立したStorage閲覧 | current→manifest→CSVが今回runを参照し、manifestとCSV全行がrunの取得実体と一致 |
+| 既存1月出力 | currentの全プロパティが実行前と一致し、元の55 bytesのCSVも存在 |
+| 最終実行履歴 | 元の8runと今回の成功1回だけの計9run、Runningなし |
+
+保存ファイル名は `lawexp-monthly_2026-10_20261031-012838-JST.csv`。履歴の開始時刻と、命名に使用するRunStartedUtcの取得時刻は1秒異なるため、ファイル名の012838が正しい。CSVのSHA-256は `b8d1028b569448afe2db5a0c9abd98d6418225e686a3632c493a68215cd38aac`。元の失敗runではなく、同じ成功runのRecords・manifest・保存実体を照合した。
+
+### 終了状態・確認範囲
+
+元のEnabled、MONTH_OVERRIDE=2026-10、開始日時2026-12-05 09:00 JST、同時実行1を維持した。既存RG・共有LAW・Storage・接続・RBAC・NW設定は変更／削除していない。既存出力も削除せず、新しい10月の出力だけが追加された。
+
+今回の成功は、ユーザーが指定済みのPerf KQLと対象LAWにおける現時点の5行についての結果。当該既存StorageのPNA実値は今回未採取であり、独立閲覧ができたことをPNA Disabled条件の取得成功と読み替えない。新たなローカルダウンロード操作は実施せず、保存済みCSVのバイト検査には実行内のBlob読み戻し実体を使用し、別途Portalで保存先の内容を独立照合した。
+
+前月自動計算への切替、確定済み前月の全量、本番量、実月次発火、保持・監視の一般受入までを保証するものではない。通常運用では対象月固定を解除する必要があるが、今回は元の設定を勝手に変更しなかった。
+
+修正前後の実体・実行・独立閲覧・既存出力保持・最終状態の画像15枚、JSON / CSV・比較結果・検証レポートを非公開保全した。実ID・ユーザー名・実データ・画像は顧客配布とGitに含めない。顧客手順には§34で補足した具体的な診断だけを残し、この環境固有の検証履歴を追加していない。コミット・PR・pushはこの修正依頼では行っていない。
+
+## 36. 顧客手順へ匿名化したPortal画面を追加（2026-10-31 JST）
+
+「テキストだけでは分かりづらいため、可能な限りスクリーンショットを含める」との依頼に対応。現行Consumptionの保存済みPortal画面を選び、公開用PNG31点を `customer/docs/images/` に追加した。生画像をコピーして配布するのではなく、環境固有の値を除去した操作・確認用の画面例として扱う。以前の構成や検討過程は顧客資料に追加しない。
+
+### 手順への対応
+
+| 文書 | 画面の対象 |
+|---|---|
+| customer/README.md | 拡大・赤枠／番号・伏せ字・本文の入力値優先・使用しない操作の案内 |
+| customer/docs/setup.md | カスタムARMの基本と3段階の確認、出力転記、Storage制限、初期Disabled、V1 MI接続、IAMの絞り込み、コードビュー、公開実値と通知 |
+| customer/docs/validation.md | 対象月、通常Run、成功履歴、3列ダミー4件、保存後の読み戻し、0件、列不整合とUploadスキップ |
+| customer/docs/query-patterns.md | 公開COLUMNSとCSV列の比較、参照専用の置換前3列、Perfの2行20 / 50、固定4列の0件、空月復元、公開、別KQLの新規名／共有基盤 |
+| customer/docs/operations.md | 対象月実行、読み戻しとcurrent公開、EntraのStorageブラウザー、承認済み経路でのダウンロード、CSV内容、専用RGだけの削除確認 |
+
+画像は元のUIをトリミングし、確認対象以外の部分を省略したもの。赤枠・番号は内容を隠さない位置に置き、手順の近くへキャプションと共に掲載した。公開JSONやCode previewは参照専用で、編集はコードビュー／デザイナーで行うことを明示。3列ダミー・Perfの4列・置換前の例・件数を混同しないようにした。Draft保存だけでの反映完了、Run draft・個別アクション送信、無効ボタンの強制操作へ誘導しない。
+
+### 匿名化と取得条件の境界
+
+アカウント・サブスクリプション・テナント・資源名とID・run ID・接続識別子・実ログ・Blob識別子などを、不透明な矩形またはトリミングで除去した。画像を新しいRGBキャンバスへ合成し、PNGのEXIF・コメント・プロファイル・透明レイヤー・末尾の追加データを残さない。生画像、加工レシピ、OCR結果、元画像との対応表は非公開保全し、Gitには入れない。顧客配布に含めるのは匿名化済みPNGと本文だけである。
+
+Storageブラウザー／CSVプレビューの元画像には§33のPublic Enabled・IP許可後の独立閲覧を使用している。顧客資料では履歴を持ち込まず、**操作・ダミー内容の例であって、Public Disabledでの独立取得やBOMの受入証拠ではない**ことを明記した。顧客の承認済み取得経路・データ権限、PNA Disabled / keylessの条件は変更していない。ダウンロードボタンの画像も実ファイル取得完了の証明ではない。
+
+追加撮影に向けたブラウザーの読み取り操作は、セッション期限切れで完了しなかった。リロード後の認証画面で停止し、CLI / RESTや自動再サインインへ切り替えていない。今回は保存済み画面だけで整備し、Azureの設定変更・Publish・Run・資源の作成／削除は行っていない。
+
+### 検査と維持
+
+公開用画像を目視し、Windows内蔵の日本語OCRをローカルで使用して残存情報を確認した。英語OCRは未導入だったため、インストールや外部サービスへの転送ではなく、導入済みの日本語認識エンジンを使用した。最終31画像のOCRで既知の実環境名・ID・run IDの検出0件、非公開対応表とのSHA-256一致、不透明RGB・メタデータ不在を確認。公開用画像の本文埋め込み・孤立画像・相対リンク・PNGの不透明RGB・メタデータ不在・画素データの整合を検査する試験を追加し、全25試験が成功した。配布生成 `--check`、全ローカルリンク、`git diff --check`も成功。静的試験は匿名化の目視／OCRを代替しない。
+
+画像はARM生成物ではなく、既存の3段階Bicep・ワークフロー・KQL正本を変更しない。提供者向けメンテナンス資料に画像更新時の安全要件を追記した。コミット・PR・pushはこの依頼では行っていない。

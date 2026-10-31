@@ -20,6 +20,8 @@
 
 まず同梱の3列ダミーで接続と基本動作を確認します。実行結果・確認日・実行ID・証拠・差異を台帳へ記録し、未確認項目を合格にしないでください。
 
+**Perfへ変更済みの場合は、[Perf専用の試験手順](query-patterns.md#32-perf-の実データがない場合の試験)を使ってください。** 以下A・C～Eの設定・期待値は3列ダミー用です。Perfでは4列・平均20 / 50の2行を確認し、AのKQL・COLUMNSへ戻しません。Bの1～3は共通の手動実行操作です。
+
 ### A. パラメーターを設定する
 
 1. Logic Appを**無効化**し、概要がDisabled、履歴にRunningがないことを確認する。現在の定義・パラメーター・開始日時・有効状態を控える。
@@ -55,6 +57,10 @@
 4. KQL・列・カスタム列・対象月・接続を確認して**Publish**する。公開成功通知と再表示した値を確認し、Draftの自動保存だけで完了としない。試験直前までDisabledを維持する。
 5. Queryの時間範囲が **Set in query**、Recurrenceが承認済みの将来日時・**Tokyo Standard Time**、同時実行数が1であることを確認する。
 
+![コードビューで外側MONTH_OVERRIDEの試験対象月2026-01を確認する](images/month-override-test.png)
+
+**画面例：** 試験対象月は外側の `MONTH_OVERRIDE.value` に設定します。KQLと列は上の3列ダミーを使い、KQL本文は上の全文を貼り付けてください。
+
 ### B. 月次を待たずに手動実行する
 
 1. Logic Appを有効化する。想定外の自動実行やRunningがないことを履歴で確認する。
@@ -75,6 +81,18 @@
 
 有効化直後はトリガーの反映待ちでDisabledのHTTP 400になる場合があります。明確な受付失敗と新runがないことを確認できた場合だけ、反映を待ってRefresh後に再試行します。受付済み・結果不明の要求を無条件に再送しません。
 
+![概要のRunとEnabled状態を確認して公開済みワークフローを1回実行する](images/normal-run.png)
+
+**操作例：** ②Enabledと将来の開始日時を確認した後に、①概要のRun → Runから1回実行します。Run draft・履歴の再送・個別アクションからの送信は使いません。
+
+![Run historyからSucceededの実行を開く](images/perf-success-history.png)
+
+**画面例：** ①Run historyを開き、②今回受け付けられた実行のIDとSucceededを確認します。実行時間・日時は例で、件数はその実行のmanifestを確認します。
+
+![3列ダミーのmanifestでrowCountが4であることを確認する](images/sample-manifest.png)
+
+**3列ダミーの確認例：** Manifestの①パラメーターで、②数値の`rowCount=4`を確認します。今回の対象月・UTC窓・runId・保存ファイルの参照も合わせて照合してください。
+
 ### C. 保存済みCSVを確認する
 
 実行詳細のアクション検索から **Read Back CSV**、**Manifest**、**Upload Current**を開きます。`Read_Back_CSV` のBodyは `$content-type` とbase64の `$content` を含むバイナリ本文です。読み込み完了後の実データを確認し、未読込の `{}` やアップロード入力だけで判定しません。未加工出力の署名付きURL・応答ヘッダーは共有ログへ転載しません。
@@ -94,6 +112,10 @@ CSV名は `<workflowName>_2026-01_<開始日時yyyyMMdd-HHmmss>-JST.csv` です�
 
 **操作者によるファイル取得は別の確認です。** [承認済み経路](operations.md#3-csv-の取得と完了判定)から保存済みcurrent → そのpathのmanifest → CSVを取得し、本文・列・件数を照合します。経路がなければ未実施と記録します。実行履歴の本文表示をダウンロード成功と扱わず、取得後も数式や日付の自動解釈を避けてCSVを開いてください。
 
+![Read Back CSVの200応答とCheck Read Back CSVの本文一致成功を確認する](images/readback-success.png)
+
+**保存確認の画面例：** ①保存後のRead Back CSV、②本文一致のCheck Read Back CSV、③読み戻しの200応答を確認します。200だけでは十分ではありません。列・件数・全値は上の3列ダミーの期待値と照合し、操作者によるCSV取得とは区別します。
+
 ### D. 0件・翌月境界・再実行
 
 毎回、無効化 → Runningなし → MONTH_OVERRIDEの変更・Publish → 有効化・1回実行 → 内容確認 → 無効化の順で行います。KQL・COLUMNS・カスタム列は変えません。
@@ -108,6 +130,10 @@ CSV名は `<workflowName>_2026-01_<開始日時yyyyMMdd-HHmmss>-JST.csv` です�
 
 0件は正常応答の `value: []` の場合だけです。本文欠損・必須bag欠損・Parse JSONエラー・PartialErrorを0件に読み替えません。
 
+![0件のmanifestで対象月と数値rowCountが0であることを確認する](images/zero-manifest.png)
+
+**0件の確認例：** 数値の`rowCount=0`と対象月・UTC窓を確認します。この画面だけではCSVの列数やBOMを判定できません。共通ダミーでは固定3列、Perfでは固定4列を別途確認します。
+
 ### E. 異常系と終了
 
 成功時の設定とcurrentを控え、**1ケースずつA・Bと同じ公開・実行手順**で試験します。各ケースの後は無効化し、変更箇所を復元します。
@@ -119,6 +145,12 @@ CSV名は `<workflowName>_2026-01_<開始日時yyyyMMdd-HHmmss>-JST.csv` です�
 | KQL_BODYを `This is not valid KQL` に変更 | QueryでFailed、Upload CurrentがSkipped。正しいダミーKQLへ戻す |
 
 各失敗後に保存済みcurrentが直前成功のままであることを承認済み経路から確認します。**current更新そのものの通信障害では、書き込み済みの可能性もあるため、保存実体を再取得して判断**します。
+
+![列順不一致でSchemaMismatchとヘッダー不一致メッセージを確認する](images/schema-mismatch.png)
+
+![列順不一致の後でUpload CSVの入力と出力がなく状態がスキップされたことを確認する](images/upload-csv-skipped.png)
+
+**列順不一致の確認例：** Terminate SchemaMismatchの内容と、Upload CSVの②「スキップされました」を確認します。Upload Currentも同じ方法で状態を確認し、保存済みcurrentの独立確認を省略しません。
 
 終了時は正しいダミー設定・列へ戻してPublishし、Disabled・Runningなしを確認します。保持するか[削除するか](operations.md#5-後片付け)を記録します。MONTH_OVERRIDEを空にするだけで本番運用を始めません。
 

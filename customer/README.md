@@ -19,6 +19,8 @@ Storage は初回から **Public network access: Disabled / Deny / AzureServices
 3. [KQL の設定・追加](docs/query-patterns.md)：Perf・操作履歴などの本文と固定列、複数KQLの追加、個別の受入確認。
 4. [運用・取得・削除](docs/operations.md)：月次確認、再実行、CSV取得、障害対応、後片付け。
 
+各手順に**スクリーンショットと赤枠・番号**を掲載しています。画像はクリックして拡大できます。環境固有の名前・ID・接続先は伏せているため、ご自身の環境の値を使用してください。画面名・配置はportalの版で異なる場合があります。入力値・件数・列は画像だけで判断せず、各手順の表・貼り付け用ファイルを正とします。画像内の **Run draft・このアクションから送信する・SASの生成**は本手順では使用しません。
+
 | 配布資材 | 用途 |
 |---|---|
 | [基盤 ARM](infra/01-foundation.json) / [入力例](infra/01-foundation.parameters.json) | 保存用 Storage、exports、評価用 LAW |

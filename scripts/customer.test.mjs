@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inflateSync } from 'node:zlib';
 import test from 'node:test';
 import { runWorkflow, sampleRecords } from './workflow-harness.mjs';
 
@@ -223,6 +224,91 @@ test('customer KQL patterns keep the monthly window and match their documented o
   assert(perf.KQL_BODY.value.includes(
     '| summarize AvgCounterValue=avg(CounterValue) by _ResourceId, Computer, bin(TimeGenerated, 1d)'));
   assert.deepEqual(perf.COLUMNS.value, ['TimeGenerated', '_ResourceId', 'Computer', 'AvgCounterValue']);
+});
+
+test('documented Perf switch preserves four-column exports with injected query responses', () => {
+  const guide = read('customer/docs/query-patterns.md');
+  const setup = guide.match(/### 3\.1[\s\S]*?(?=### 3\.2)/)[0];
+  const arrays = [...setup.matchAll(/```json\r?\n([\s\S]*?)```/g)].map(match => JSON.parse(match[1]));
+  const canonical = json('settings/perf-cpu-daily.json');
+  assert.deepEqual(arrays[0], canonical.COLUMNS.value);
+  assert.deepEqual(arrays[1], delivered('settings/perf-cpu-daily.csv-columns.json'));
+  const section = guide.match(/### 3\.2[\s\S]*?(?=### 3\.3)/)[0];
+  const kql = section.match(/```kusto\r?\n([\s\S]*?)```/)[1].replaceAll('\r\n', '\n').trim();
+  assert(kql.startsWith('datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterName:string, CounterValue:real)'));
+  assert.equal(kql.slice(kql.indexOf('\n| where')), canonical.KQL_BODY.value.slice('Perf'.length));
+  const rows = [...kql.matchAll(/datetime\(([^)]+)\),\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*([\d.]+)/g)]
+    .map(([, time, resource, computer, counter, value]) => [time, resource, computer, counter, Number(value)]);
+  assert.deepEqual(rows, [
+    ['2026-01-15T00:10:00Z', '/sample-resource', 'sample-computer', '% Processor Time', 10],
+    ['2026-01-15T00:20:00Z', '/sample-resource', 'sample-computer', '% Processor Time', 30],
+    ['2026-01-16T00:10:00Z', '/sample-resource', 'sample-computer', '% Processor Time', 50],
+    ['2026-01-15T00:30:00Z', '/sample-resource', 'sample-computer', 'Other Counter', 999],
+  ]);
+  const settings = structuredClone(sample);
+  settings.COLUMNS.value = arrays[0];
+  settings.KQL_BODY.value = kql;
+  const workflow = structuredClone(definition);
+  const blobs = new Map();
+  const options = { blobs, workflowName: 'lawexp-perf-cpu' };
+  const initial = runWorkflow(definition, sample, { ...options, runId: 'initial-sample' });
+  assert.equal(initial.status, 'Succeeded', initial.error?.stack);
+  const before = storedRun(initial);
+  const queryResponse = { value: [
+    { bag: { AvgCounterValue: 20, Computer: 'sample-computer', _ResourceId: '/sample-resource', TimeGenerated: '2026-01-15T00:00:00.0000000Z' } },
+    { bag: { Computer: 'sample-computer', TimeGenerated: '2026-01-16T00:00:00.0000000Z', AvgCounterValue: 50, _ResourceId: '/sample-resource' } },
+  ] };
+  const incomplete = runWorkflow(workflow, settings, { ...options, runId: 'stale-custom-columns', queryResponse });
+  assert.equal(incomplete.status, 'Failed', 'Changing parameters alone must not silently keep the sample CSV columns');
+  assert(!incomplete.trace.includes('Upload_Current'));
+  assert.deepEqual(storedRun(initial).current, before.current);
+
+  workflow.actions.Export.actions.Create_CSV_table.inputs.columns = arrays[1];
+  const success = runWorkflow(workflow, settings, { ...options, runId: 'perf-first', queryResponse });
+  assert.equal(success.status, 'Succeeded', success.error?.stack);
+  assert.equal(success.outputs.QueryText,
+    `let start=datetime(2025-12-31T15:00:00); let end=datetime(2026-01-31T15:00:00); ${kql}`);
+  const saved = storedRun(success);
+  const expected = '\uFEFFTimeGenerated,_ResourceId,Computer,AvgCounterValue\r\n' +
+    '2026-01-15T00:00:00.0000000Z,/sample-resource,sample-computer,20\r\n' +
+    '2026-01-16T00:00:00.0000000Z,/sample-resource,sample-computer,50\r\n';
+  assert.equal(saved.csv.toString('utf8'), expected);
+  assert.equal(saved.csv.length, 187);
+  assert.equal(saved.manifest.rowCount, 2);
+  assert.equal(saved.manifest.csvReadBackVerified, true);
+
+  settings.MONTH_OVERRIDE.value = '2025-11';
+  const zero = runWorkflow(workflow, settings, { ...options, runId: 'perf-zero', queryResponse: { value: [] } });
+  assert.equal(zero.status, 'Succeeded', zero.error?.stack);
+  assert.equal(storedRun(zero).manifest.rowCount, 0);
+  assert.equal(storedRun(zero).csv.toString('utf8'), '\uFEFFTimeGenerated,_ResourceId,Computer,AvgCounterValue\r\n');
+  assert.equal(storedRun(zero).csv.length, 55);
+  assert.deepEqual(storedRun(success).current, saved.current);
+
+  settings.MONTH_OVERRIDE.value = '2026-01';
+  const reversed = structuredClone(workflow);
+  reversed.actions.Export.actions.Create_CSV_table.inputs.columns.reverse();
+  const failed = runWorkflow(reversed, settings, { ...options, runId: 'perf-bad-columns', queryResponse });
+  assert.equal(failed.status, 'Failed');
+  assert(!failed.trace.includes('Upload_CSV'));
+  assert(!failed.trace.includes('Upload_Current'));
+  assert.deepEqual(storedRun(success).current, saved.current);
+  const restored = runWorkflow(workflow, settings, { ...options, runId: 'perf-restored', queryResponse });
+  assert.equal(restored.status, 'Succeeded', restored.error?.stack);
+  assert.equal(storedRun(restored).csv.toString('utf8'), expected);
+  assert.equal(storedRun(restored).current.runId, 'perf-restored');
+  assert.equal(blobs.get(`/exports/${saved.current.path}${saved.current.csvFileName}`).toString('utf8'), expected);
+
+  settings.KQL_BODY.value = canonical.KQL_BODY.value;
+  settings.MONTH_OVERRIDE.value = '';
+  const productionShape = runWorkflow(workflow, settings, {
+    ...options, runId: 'perf-parameters-restored', now: '2026-02-05T00:00:00Z', queryResponse,
+  });
+  assert.equal(productionShape.status, 'Succeeded', productionShape.error?.stack);
+  assert.equal(productionShape.outputs.Month, '2026-01');
+  assert(productionShape.outputs.QueryText.includes('; Perf\n'));
+  assert(!productionShape.outputs.QueryText.includes('datatable'));
+  assert.equal(storedRun(productionShape).csv.toString('utf8'), expected);
 });
 
 test('offline WDL harness accepts each pattern response shape and rejects stale columns', () => {
@@ -620,6 +706,63 @@ test('customer guides stay within the delivery and exclude implementation histor
   const kqlTokens = query => query.match(/"(?:\\.|[^"\\])*"|[^\s"]/g);
   assert.deepEqual(kqlTokens(snippet[1]), kqlTokens(sample.KQL_BODY.value),
     'Documented dummy KQL must match the canonical sample, allowing formatting outside strings');
+});
+
+test('customer screenshots cover the procedures without orphan images or embedded metadata', () => {
+  const directory = resolve(customer, 'docs/images');
+  const images = files(directory);
+  assert(images.length >= 31, 'Keep screenshots for the setup, testing, KQL and operational procedures');
+  assert(images.every(path => path.endsWith('.png')), 'Deliver only processed PNG screenshots');
+  const required = {
+    'setup.md': ['template-basics', 'foundation-review', 'foundation-outputs', 'storage-security',
+      'workflow-review', 'access-review', 'initial-disabled', 'connector-logs-mi', 'connector-blob-mi',
+      'iam-role-filters', 'code-view-schedule', 'published-parameters', 'publish-confirmation'],
+    'validation.md': ['month-override-test', 'normal-run', 'perf-success-history', 'sample-manifest',
+      'readback-success', 'zero-manifest', 'schema-mismatch', 'upload-csv-skipped'],
+    'query-patterns.md': ['published-parameters', 'csv-columns-reference', 'perf-manifest',
+      'perf-csv-preview', 'perf-zero-preview', 'month-override-empty', 'code-view-schedule',
+      'publish-confirmation', 'workflow-review'],
+    'operations.md': ['month-override-test', 'normal-run', 'readback-success', 'current-publication',
+      'storage-browser-entra', 'blob-download', 'perf-csv-preview', 'delete-scope', 'delete-confirm'],
+  };
+  const referenced = new Set();
+  for (const [guide, names] of Object.entries(required)) {
+    const text = read(`customer/docs/${guide}`);
+    const links = [...text.matchAll(/!\[[^\]]+\]\(([^)]+)\)/g)].map(match => match[1]);
+    for (const name of names) {
+      assert(links.includes(`images/${name}.png`), `${guide}: missing ${name} screenshot`);
+    }
+    for (const link of links) referenced.add(resolve(customer, 'docs', link));
+  }
+  assert.deepEqual([...referenced].sort(), images.sort(), 'Every image must be embedded in a procedure');
+  for (const path of images) {
+    const bytes = readFileSync(path);
+    assert.deepEqual(bytes.subarray(0, 8), Buffer.from('89504e470d0a1a0a', 'hex'), path);
+    const width = bytes.readUInt32BE(16);
+    const height = bytes.readUInt32BE(20);
+    assert(width >= 350 && height >= 80, `${relative(root, path)}: image is too small to read`);
+    assert.equal(bytes[24], 8, 'Screenshots must use 8-bit channels');
+    assert.equal(bytes[25], 2, 'Screenshots must be opaque RGB, without a hidden alpha layer');
+    const compressed = [];
+    let offset = 8;
+    const chunks = [];
+    while (offset < bytes.length) {
+      const length = bytes.readUInt32BE(offset);
+      const type = bytes.toString('ascii', offset + 4, offset + 8);
+      assert(offset + length + 12 <= bytes.length, `${relative(root, path)}: truncated PNG`);
+      assert(['IHDR', 'IDAT', 'IEND'].includes(type),
+        `${relative(root, path)}: remove EXIF, comments, profiles and other source metadata`);
+      chunks.push(type);
+      if (type === 'IDAT') compressed.push(bytes.subarray(offset + 8, offset + 8 + length));
+      offset += length + 12;
+      if (type === 'IEND') break;
+    }
+    assert.equal(chunks[0], 'IHDR');
+    assert.equal(chunks.at(-1), 'IEND');
+    assert.equal(offset, bytes.length, 'Do not append source data after the PNG');
+    assert.equal(inflateSync(Buffer.concat(compressed)).length, height * (width * 3 + 1),
+      `${relative(root, path)}: invalid screenshot pixel data`);
+  }
 });
 
 test('all active documentation local links resolve without constraining wording', () => {
