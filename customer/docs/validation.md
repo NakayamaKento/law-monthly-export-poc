@@ -4,17 +4,19 @@
 
 ## 1. 確認範囲と前提
 
-同梱のダミーKQLを実際のLog Analyticsで実行し、MI管理コネクタによるCSV保存・実行内読み戻しを確認します。ログ取り込み・テーブル作成・過去ログは不要です。
+同梱のダミーKQLを**取得元として指定した既存LAW**で実行し、MI管理コネクタによるCSV保存・実行内読み戻しを確認します。ダミーの行はKQLの `datatable` 内で生成するため、LAWの新規作成・ログ取り込み・テーブル作成・過去ログは不要です。既存データへの追加・更新は行わず、保持・取り込み・ネットワーク設定を変更しません。
 
 | 本サンプルの確認範囲 | 導入先で行うこと |
 |---|---|
-| portalの3段階構築、初回からStorage Public Disabled・共有キー無効、MI接続 | [導入手順](setup.md)に従い、接続・設定・権限を確認 |
+| portalの3段階構築、初回からStorage Public Disabled・共有キー無効、MI接続 | [導入手順](setup.md)に従い、既存LAWのARM ID・MI接続・設定・権限を確認。別RGへの権限用子デプロイは導入先で受入確認 |
 | ダミー4 / 0 / 1件、固定列順、特殊文字、再実行、列不整合時の停止 | §2を実行し、保存内容・件数・最終状態を記録 |
 | 共通Storageへの複数KQL出力、用途名・対象月・JST日時付きCSV名、current・旧CSV保持 | KQLごとに試験し、相互の保存先・currentが混ざらないことを確認 |
 | PerfダミーのUTC日次平均20 / 50、固定4列 | [Perfのダミー試験](query-patterns.md#32-perf-の実データがない場合の試験)で本文と列を確認 |
 | 実データの抽出・集計、本番量、実月次、操作者による独立CSV取得は未確認 | 本番利用前に業務KQL・予定・取得経路を受入確認 |
 
 **前提**：[導入手順](setup.md)の3段階を完了し、システムMI・管理接続2個・RBACが反映済みであること。StorageはPublic Disabled / Deny / AzureServices、共有キー・匿名アクセス無効を維持します。接続や保存に失敗しても、Public有効化・キー認証へ切り替えません。
+
+試験前後で、既存LAWのARM ID・保持日数・取り込み・ネットワーク設定が作業前の台帳と一致し、新規のLAWがないことも確認します。既存LAWへの管理コネクタ接続や別RG・別サブスクリプションの権限設定は、静的なテンプレート検査だけで合格にしません。
 
 ## 2. 実データ不要のダミーテスト
 
@@ -29,7 +31,7 @@
 
    | 名前 | 値 |
    |---|---|
-   | LAW_RESOURCE_ID | 導入時のLAWのARMリソースID |
+   | LAW_RESOURCE_ID | 取得元として承認した既存LAWのARM ID。第2・3段階のlawResourceIdと同じ値を維持 |
    | STORAGE_ACCOUNT_NAME | 導入時の保存用Storage名 |
    | MONTH_OVERRIDE | `2026-01` |
    | COLUMNS | **配列** `["TimeGenerated","Id","Text"]` |
@@ -54,7 +56,7 @@
    ```
 
 3. コードビューでは外側の `parameters.<名前>.value` を編集する。型定義の `definition.parameters` と混同しない。JSON文字列は[sample.json](../settings/sample.json)の対象項目を参考にし、設定全体で接続先を上書きしない。
-4. KQL・列・カスタム列・対象月・接続を確認して**Publish**する。公開成功通知と再表示した値を確認し、Draftの自動保存だけで完了としない。試験直前までDisabledを維持する。
+4. KQL・列・カスタム列・対象月・接続を確認して**Publish**する。変更対象以外の定義・アクションのinputs・同時実行1・予定も保持する。Draftで欠落している場合は[公開済みJSONからの復元手順](setup.md#5-パラメーターと保存内容の確認)に従う。公開成功通知と再表示した値を確認し、Draftの自動保存だけで完了としない。試験直前までDisabledを維持する。
 5. Queryの時間範囲が **Set in query**、Recurrenceが承認済みの将来日時・**Tokyo Standard Time**、同時実行数が1であることを確認する。
 
 ![コードビューで外側MONTH_OVERRIDEの試験対象月2026-01を確認する](images/month-override-test.png)

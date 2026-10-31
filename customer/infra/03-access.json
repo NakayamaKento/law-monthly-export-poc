@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "7770605372456368012"
+      "templateHash": "5763694763129714595"
     }
   },
   "parameters": {
@@ -15,8 +15,11 @@
     "storageAccountName": {
       "type": "string"
     },
-    "lawName": {
-      "type": "string"
+    "lawResourceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Same existing workspace ARM resource ID used in the workflow stage. Role assignment only; the workspace settings are preserved."
+      }
     }
   },
   "resources": [
@@ -32,14 +35,68 @@
       }
     },
     {
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
-      "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName'))]",
-      "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName')), resourceId('Microsoft.Logic/workflows', parameters('workflowName')), 'log-reader')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('law-access-{0}', uniqueString(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), parameters('lawResourceId')))]",
+      "subscriptionId": "[split(parameters('lawResourceId'), '/')[2]]",
+      "resourceGroup": "[split(parameters('lawResourceId'), '/')[4]]",
       "properties": {
-        "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]",
-        "principalType": "ServicePrincipal",
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '73c42c96-874c-492b-b04d-ab87d138a893')]"
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "lawName": {
+            "value": "[split(parameters('lawResourceId'), '/')[8]]"
+          },
+          "workflowResourceId": {
+            "value": "[resourceId('Microsoft.Logic/workflows', parameters('workflowName'))]"
+          },
+          "principalId": {
+            "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "6865492328024547358"
+            }
+          },
+          "parameters": {
+            "lawName": {
+              "type": "string"
+            },
+            "workflowResourceId": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName')), parameters('workflowResourceId'), 'log-reader')]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '73c42c96-874c-492b-b04d-ab87d138a893')]"
+              }
+            }
+          ],
+          "outputs": {
+            "lawRoleAssignmentId": {
+              "type": "string",
+              "value": "[extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName')), parameters('workflowResourceId'), 'log-reader'))]"
+            }
+          }
+        }
       }
     }
   ],
@@ -50,7 +107,11 @@
     },
     "lawRoleAssignmentId": {
       "type": "string",
-      "value": "[extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName')), resourceId('Microsoft.Logic/workflows', parameters('workflowName')), 'log-reader'))]"
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', split(parameters('lawResourceId'), '/')[2], split(parameters('lawResourceId'), '/')[4]), 'Microsoft.Resources/deployments', format('law-access-{0}', uniqueString(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), parameters('lawResourceId')))), '2025-04-01').outputs.lawRoleAssignmentId.value]"
+    },
+    "lawAccessDeploymentName": {
+      "type": "string",
+      "value": "[format('law-access-{0}', uniqueString(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), parameters('lawResourceId')))]"
     }
   }
 }

@@ -4,7 +4,8 @@ param location string = resourceGroup().location
 @description('KQL identifier and exports blob prefix. Use a different workflow name for each KQL across the shared storage account.')
 param workflowName string = 'lawexp-monthly'
 param storageAccountName string
-param lawName string
+@description('Full ARM resource ID of an existing Log Analytics workspace in the same tenant. This deployment does not create or modify the workspace.')
+param lawResourceId string
 
 @description('Future fifth day of a month at 09:00 JST, without Z or a UTC offset. Check before enabling the workflow.')
 param startTime string = '2026-12-05T09:00:00'
@@ -14,10 +15,6 @@ param kqlBody string = 'datatable(TimeGenerated:datetime, Id:int, Text:string)[d
 
 @description('Use 2026-01 for the four-row sample, 2025-11 for zero rows, 2026-02 for one row; clear for production.')
 param monthOverride string = '2026-01'
-
-resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
-  name: lawName
-}
 
 var monitorApiId = subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'azuremonitorlogs')
 var blobApiId = subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'azureblob')
@@ -95,7 +92,7 @@ resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
       COLUMNS: { value: columns }
       KQL_BODY: { value: kqlBody }
       MONTH_OVERRIDE: { value: monthOverride }
-      LAW_RESOURCE_ID: { value: law.id }
+      LAW_RESOURCE_ID: { value: lawResourceId }
       STORAGE_ACCOUNT_NAME: { value: storageAccountName }
       '$connections': {
         value: {

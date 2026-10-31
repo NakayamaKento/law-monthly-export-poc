@@ -60,7 +60,14 @@ test('delivery contains only the three self-contained Consumption stages and can
       assert(!/\bvariables\(/.test(JSON.stringify(parameter.defaultValue)), 'ARM defaults cannot reference template variables');
     }
     assert(template.resources.length > 0);
-    assert(!objects(template).some(value => value.templateLink || value.type === 'Microsoft.Resources/deployments'));
+    assert(!objects(template).some(value => value.templateLink), 'Keep child templates embedded in the delivery');
+    const deployments = template.resources.filter(resource => resource.type === 'Microsoft.Resources/deployments');
+    assert.equal(deployments.length, stage === '03-access' ? 1 : 0);
+    for (const deployment of deployments) {
+      assert(deployment.properties.template, 'Cross-scope access must not require a fourth customer file');
+      assert.equal(deployment.properties.mode, 'Incremental');
+      assert.equal(deployment.properties.expressionEvaluationOptions.scope, 'inner');
+    }
   }
   for (const path of files(customer).filter(path => path.endsWith('.json'))) {
     assert.doesNotThrow(() => JSON.parse(readFileSync(path, 'utf8')), path);
@@ -79,21 +86,22 @@ test('delivery contains only the three self-contained Consumption stages and can
   }
   const paths = ['infra', 'logicapp', 'settings', 'scripts'].flatMap(dir => files(resolve(root, dir)));
   assert(paths.every(path => !/app-ws|host\.json|connections\.json|\.ps1$|\.sh$|workflow\.json$|settings-/i.test(path)));
-  const types = stages.flatMap(stage => delivered(`infra/${stage}.json`).resources.map(resource => resource.type));
+  const types = stages.flatMap(stage => objects(delivered(`infra/${stage}.json`))
+    .filter(value => typeof value.type === 'string' && value.type.startsWith('Microsoft.')).map(value => value.type));
   assert(types.every(type => [
     'Microsoft.Storage/storageAccounts',
     'Microsoft.Storage/storageAccounts/blobServices',
     'Microsoft.Storage/storageAccounts/blobServices/containers',
-    'Microsoft.OperationalInsights/workspaces',
     'Microsoft.Logic/workflows',
     'Microsoft.Web/connections',
     'Microsoft.Authorization/roleAssignments',
+    'Microsoft.Resources/deployments',
   ].includes(type)), types.join(','));
 });
 
 test('foundation starts keyless and public-disabled with only a trusted-service exception', () => {
   const { resources } = delivered('infra/01-foundation.json');
-  assert.equal(resources.length, 4);
+  assert.equal(resources.length, 3);
   const storage = resources.filter(resource => resource.type === 'Microsoft.Storage/storageAccounts');
   assert.equal(storage.length, 1);
   const properties = storage[0].properties;
@@ -108,10 +116,9 @@ test('foundation starts keyless and public-disabled with only a trusted-service 
   const container = resources.find(resource => resource.type.endsWith('/containers'));
   assert.equal(container.properties.publicAccess, 'None');
   assert(container.name.includes('exports'));
-  const law = resources.find(resource => resource.type === 'Microsoft.OperationalInsights/workspaces');
-  assert.equal(law.properties.publicNetworkAccessForQuery, 'Enabled');
-  assert.equal(law.properties.publicNetworkAccessForIngestion, 'Disabled');
-  assert.equal(delivered('infra/01-foundation.parameters.json').parameters.retentionInDays.value, 90);
+  assert.deepEqual(Object.keys(delivered('infra/01-foundation.json').outputs).sort(),
+    ['exportsContainerResourceId', 'storageAccountName']);
+  assert(!delivered('infra/01-foundation.json').parameters.retentionInDays);
 });
 
 test('Consumption uses two V1 MI connections, system identity and disabled initial workflow', () => {
@@ -155,17 +162,51 @@ test('Consumption uses two V1 MI connections, system identity and disabled initi
 test('access stage grants only container Blob Data Contributor and workspace Log Analytics Reader', () => {
   const template = delivered('infra/03-access.json');
   assert.equal(template.resources.length, 2);
-  for (const role of template.resources) {
-    assert.equal(role.type, 'Microsoft.Authorization/roleAssignments');
-    assert.equal(role.properties.principalType, 'ServicePrincipal');
-    assert(role.properties.principalId.includes("reference(resourceId('Microsoft.Logic/workflows'"));
-    assert(role.properties.principalId.endsWith('.identity.principalId]'));
-  }
-  const blob = template.resources.find(resource => resource.properties.roleDefinitionId.includes('ba92f5b4-2d11-453d-a403-e96b0029c9fe'));
-  const law = template.resources.find(resource => resource.properties.roleDefinitionId.includes('73c42c96-874c-492b-b04d-ab87d138a893'));
+  const blob = template.resources.find(resource => resource.type === 'Microsoft.Authorization/roleAssignments');
+  const deployment = template.resources.find(resource => resource.type === 'Microsoft.Resources/deployments');
+  assert.equal(blob.properties.principalType, 'ServicePrincipal');
+  assert(blob.properties.principalId.includes("reference(resourceId('Microsoft.Logic/workflows'"));
+  assert(blob.properties.principalId.endsWith('.identity.principalId]'));
+  assert(blob.properties.roleDefinitionId.includes('ba92f5b4-2d11-453d-a403-e96b0029c9fe'));
   assert(blob.scope.includes("Microsoft.Storage/storageAccounts/blobServices/containers"));
   assert(blob.scope.includes('exports'));
-  assert(law.scope.includes('Microsoft.OperationalInsights/workspaces'));
+  const child = deployment.properties.template;
+  assert.equal(child.resources.length, 1);
+  const law = child.resources[0];
+  assert.equal(law.type, 'Microsoft.Authorization/roleAssignments');
+  assert.equal(law.properties.principalType, 'ServicePrincipal');
+  assert.equal(law.properties.principalId, "[parameters('principalId')]");
+  assert.equal(deployment.properties.parameters.principalId.value, blob.properties.principalId);
+  assert(law.properties.roleDefinitionId.includes('73c42c96-874c-492b-b04d-ab87d138a893'));
+  assert(law.properties.roleDefinitionId.startsWith("[subscriptionResourceId("));
+  assert.equal(law.scope, "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName'))]");
+  assert.equal(deployment.subscriptionId, "[split(parameters('lawResourceId'), '/')[2]]");
+  assert.equal(deployment.resourceGroup, "[split(parameters('lawResourceId'), '/')[4]]");
+  assert.equal(deployment.properties.parameters.lawName.value, "[split(parameters('lawResourceId'), '/')[8]]");
+  assert.equal(deployment.properties.parameters.workflowResourceId.value,
+    "[resourceId('Microsoft.Logic/workflows', parameters('workflowName'))]");
+  assert(template.outputs.lawRoleAssignmentId.value.includes('.outputs.lawRoleAssignmentId.value]'));
+  assert(template.outputs.lawRoleAssignmentId.value.includes("split(parameters('lawResourceId'), '/')[2]"));
+  assert(template.outputs.lawRoleAssignmentId.value.includes("split(parameters('lawResourceId'), '/')[4]"));
+  assert(template.outputs.lawAccessDeploymentName);
+});
+
+test('existing workspace ID is shared across stages without creating or changing a workspace', () => {
+  for (const stage of stages) {
+    const template = delivered(`infra/${stage}.json`);
+    assert(!objects(template).some(value => value.type === 'Microsoft.OperationalInsights/workspaces'));
+    assert(!/publicNetworkAccessForQuery|publicNetworkAccessForIngestion|retentionInDays/.test(JSON.stringify(template)));
+  }
+  const workflow = delivered('infra/02-workflow.json').resources.find(resource => resource.type === 'Microsoft.Logic/workflows');
+  assert.equal(workflow.properties.parameters.LAW_RESOURCE_ID.value, "[parameters('lawResourceId')]");
+  const parameters = delivered('infra/02-workflow.parameters.json').parameters;
+  assert.equal(parameters.lawResourceId.value, delivered('infra/03-access.parameters.json').parameters.lawResourceId.value);
+  assert(parameters.lawResourceId.value.includes('/subscriptions/<LAW_SUBSCRIPTION_ID>/resourceGroups/<LAW_RESOURCE_GROUP>/'));
+  assert(!parameters.lawName);
+  const setup = read('customer/docs/setup.md');
+  assert(setup.includes('既存LAW') && setup.includes('lawResourceId'));
+  assert(setup.includes('保持日数') && setup.includes('変更しません'));
+  assert(read('customer/docs/operations.md').includes('既存LAWは削除しません'));
 });
 
 test('monthly trigger is anchored in JST, serialized, and has no unsupported monthly time schedule', () => {

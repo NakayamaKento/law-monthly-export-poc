@@ -28,13 +28,12 @@ const stages = {
   '01-foundation': {
     location: 'southeastasia',
     prefix: 'lawexp',
-    retentionInDays: 90,
   },
   '02-workflow': {
     location: 'southeastasia',
     workflowName: 'lawexp-monthly',
     storageAccountName: '<STORAGE_ACCOUNT_NAME>',
-    lawName: '<LAW_NAME>',
+    lawResourceId: '/subscriptions/<LAW_SUBSCRIPTION_ID>/resourceGroups/<LAW_RESOURCE_GROUP>/providers/Microsoft.OperationalInsights/workspaces/<LAW_NAME>',
     startTime: '2026-12-05T09:00:00',
     columns: sample.COLUMNS.value,
     kqlBody: sample.KQL_BODY.value,
@@ -43,7 +42,7 @@ const stages = {
   '03-access': {
     workflowName: 'lawexp-monthly',
     storageAccountName: '<STORAGE_ACCOUNT_NAME>',
-    lawName: '<LAW_NAME>',
+    lawResourceId: '/subscriptions/<LAW_SUBSCRIPTION_ID>/resourceGroups/<LAW_RESOURCE_GROUP>/providers/Microsoft.OperationalInsights/workspaces/<LAW_NAME>',
   },
 };
 
