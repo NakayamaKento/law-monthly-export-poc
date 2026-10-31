@@ -112,13 +112,34 @@ CSVアクションのカスタム列も同じ順にします。[配布用の配�
 ]
 ```
 
+`Create_CSV_table` が「`Id` が存在しない」などの `InvalidTemplate` で失敗する場合は、旧3列のカスタム列が残っていないか確認してください。`COLUMNS` パラメーターを4列へ変更しても、このアクションの列定義は自動更新されません。上の4列配列へ置き換えてPublishし、再表示で確認します。この列不整合をStorageのネットワーク設定やキー認証の変更で回避しないでください。
+
+![公開済みのCOLUMNSがPerf用4列になっていることを確認する](images/published-parameters.png)
+
+**確認例①：** 公開済みJSONの外側 `parameters.COLUMNS.value` がPerf用4列であることを確認します。KQLは画像で一部しか表示されていないため、本文は同梱のファイルから全文を使います。
+
+![Create CSV tableのCode previewで3列のカスタム列が残っている例を確認する](images/csv-columns-reference.png)
+
+**確認例②・置換前：** この画像は3列ダミーのCSV列定義で、Perf用の完成形ではありません。①実行履歴のCode previewは**参照専用**です。②`columns`にId / Textが残っている場合は、**コードビューで**上のPerf用4列配列へ置き換えます。COLUMNSだけの変更では不十分です。
+
 **月の抽出期間と、日別集計の区切りは別です。** 抽出期間はJSTの前月をUTCへ変換します。`bin(TimeGenerated, 1d)` による日別集計は **UTCの00:00区切り**で、CSVの `TimeGenerated` もUTCの日開始です。JST日単位の集計が必要な場合は、集計式と期待値を別途確認してください。JST暦月の端ではUTC日グループが一部の時間だけを含むことがあります。
 
 `MONTH_OVERRIDE` もJST暦月を指定します。過去月の実データを試験する場合は保持期間を確認し、データ不存在とクエリエラーを区別してください。
 
 ### 3.2 Perf の実データがない場合の試験
 
-作業用コピーのKQLで、先頭の `Perf` **だけ**を次の `datatable` に置き換えます。§3.1の `| where TimeGenerated >= start ...` 以降はそのまま残し、4列の `COLUMNS` とカスタム列を維持します。`MONTH_OVERRIDE="2026-01"` で手動試験してください。
+既存の3列ダミーからPerfへ切り替える場合も、以下の手順を使います。**[共通ダミーテスト](validation.md#2-実データ不要のダミーテスト)のAに戻って設定し直さないでください。** 本試験は4列・2行で、共通ダミーの3列・4件とは期待値が異なります。
+
+1. Logic Appを **Disabled** にし、Runningがないことを確認する。公開済み定義・パラメーター・開始日時・接続を控える。
+2. 次の設定とKQL本文を合わせて変更する。コードビューでは外側の `parameters.<名前>.value` を編集し、KQL本文だけでエディター全体を置き換えない。`LAW_RESOURCE_ID`、`STORAGE_ACCOUNT_NAME`、`$connections` は保持する。
+
+| 変更箇所 | 設定値 |
+|---|---|
+| `MONTH_OVERRIDE` | `2026-01` |
+| `COLUMNS` | 配列 `["TimeGenerated","_ResourceId","Computer","AvgCounterValue"]` |
+| `Create_CSV_table.inputs.columns` | [perf-cpu-daily.csv-columns.json](../settings/perf-cpu-daily.csv-columns.json)の4列配列。コードビューでは `definition.actions.Export.actions.Create_CSV_table.inputs.columns` |
+
+`KQL_BODY` には**次の全文**を貼り付けます。datatableだけで終わらず、時間条件・カウンター条件・集計・project・bagまで含めます。先頭の `Perf` を残して二重にしないでください。
 
 ```kusto
 datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterName:string, CounterValue:real)
@@ -128,11 +149,45 @@ datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterNa
   datetime(2026-01-16T00:10:00Z), "/sample-resource", "sample-computer", "% Processor Time", 50.0,
   datetime(2026-01-15T00:30:00Z), "/sample-resource", "sample-computer", "Other Counter", 999.0
 ]
+| where TimeGenerated >= start and TimeGenerated < end
+| where CounterName == "% Processor Time"
+| summarize AvgCounterValue=avg(CounterValue) by _ResourceId, Computer, bin(TimeGenerated, 1d)
+| project TimeGenerated, _ResourceId, Computer, AvgCounterValue
+| project bag=pack_all()
 ```
 
-期待値は2行で、UTCの1月15日開始の `AvgCounterValue=20`、1月16日開始の `AvgCounterValue=50` です。行順は保証しないため、日時・リソース・コンピューターの組み合わせで照合します。manifest の `rowCount` は元の4レコードではなく **2** です。期間を `2025-11` に変えた試験では0行・4列のヘッダーだけになることを確認します。
+3. **Publish**成功後、KQL・4列のCOLUMNS・4列のカスタム列・対象月を再表示して確認する。Queryの時間範囲は **Set in query**、開始日時は承認済みの将来日時、タイムゾーンは **Tokyo Standard Time**、同時実行数は1を維持する。
+4. [手動実行](validation.md#b-月次を待たずに手動実行する)の1～3（有効化・1回実行・履歴確認）を行い、実行されたQueryTextと次の期待値を照合する。同節の3列ダミー用「RowCount=4」は使わない。
 
-試験後は先頭を `Perf` に戻し、`MONTH_OVERRIDE` を空にしてPublishします。実テーブルの存在・データ・結果の受入前は無効のままにします。
+| 確認箇所 | Perfダミーの期待値 |
+|---|---|
+| 期間 | `2025-12-31T15:00:00` 以上、`2026-01-31T15:00:00` 未満（UTC） |
+| CSVヘッダー | `TimeGenerated,_ResourceId,Computer,AvgCounterValue` |
+| 1月15日開始（UTC）の行 | `/sample-resource`、`sample-computer`、平均 `20` |
+| 1月16日開始（UTC）の行 | `/sample-resource`、`sample-computer`、平均 `50` |
+| RowCount / manifest.rowCount | JSON数値の **2**。元のdatatableの4レコードではない |
+| 保存・読み戻し | Succeeded、本文一致、manifestの `csvReadBackVerified=true` |
+| CSV名・参照 | 現在のworkflowName・対象月・開始日時JSTを含み、manifest.filesとcurrent.csvFileNameが実CSV名と一致 |
+
+行順は保証しないため、日時・リソース・コンピューターで照合します。日時は小数部を含むUTC表記となる場合があります。操作者によるファイル取得は[承認済みの取得経路](operations.md#3-csv-の取得と完了判定)で別途確認します。
+
+![Perfダミーのmanifestで数値rowCountが2であることを確認する](images/perf-manifest.png)
+
+![PerfダミーCSVで固定4列と2行の平均20・50を確認する](images/perf-csv-preview.png)
+
+**Perfの結果例：** manifestは`rowCount=2`、CSVは固定4列・平均20 / 50の2行です。CSV画像はダミーの**内容例**であり、取得経路・NW条件やBOMの確認を証明するものではありません。導入先では承認済み経路で実ファイルを確認します。
+
+5. 無効化・Runningなしを確認し、`MONTH_OVERRIDE` **だけ**を `2025-11` にしてPublish・手動実行する。KQLと4列設定は変えず、0行・BOM＋上記4列ヘッダー＋CRLF、数値rowCount=0を確認する。
+6. 列不整合も試す場合は、無効化して対象月を `2026-01` へ戻し、COLUMNSは正しいまま**カスタム列だけ逆順**にする。Publish・実行後にFailed / SchemaMismatch、Upload CSV / Upload CurrentのSkippedを確認する。無効化し、正しいカスタム列へ戻してPublish・再実行し、2行・平均20 / 50の成功へ復元する。
+7. 終了時は無効化し、`KQL_BODY` を§3.1の **Perfから始まる全文**、`MONTH_OVERRIDE` を空文字へ戻してPublishする。COLUMNSとカスタム列は4列を維持する。実テーブルの存在・権限・データ・結果の受入前は無効のままにし、ダミーKQLのまま月次運用を開始しない。
+
+![Perfの0件CSVでも固定4列のヘッダーが残ることを確認する](images/perf-zero-preview.png)
+
+**手順5の内容例：** データ行がなくてもヘッダーは4列のままです。0件をエラーの代替結果として扱わず、正常応答・数値rowCount=0・読み戻し成功を合わせて確認します。
+
+![通常運用へ戻すときに外側MONTH_OVERRIDEのvalueを空文字にする](images/month-override-empty.png)
+
+**手順7の復元例：** `MONTH_OVERRIDE.value`は空文字です。KQLは本番Perf本文へ戻し、COLUMNSとCSVカスタム列は4列を維持してPublishします。対象月だけの解除で、ダミーKQLのまま本番化しないでください。
 
 ### 3.3 他の業務 KQL に適用する
 
@@ -161,7 +216,7 @@ datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterNa
 
 1. Logic App を **Disabled** にし、Running がないことを確認する。現在の KQL、列、対象月、有効状態、公開済みの定義全体を台帳へ控える。
 2. 対象パターンの `.kql` と対応する `COLUMNS` を上表から選ぶ。まず試験対象月を `MONTH_OVERRIDE` に指定する。
-3. Logic App の **パラメーター**画面で `KQL_BODY` に `.kql` 本文を、`COLUMNS` に対応する配列を入力する。KQL 本文入力欄には JSON の外側の引用符や `\n` を貼らず、改行された本文を使う。
+3. Logic App の **パラメーター**画面で実際の値を編集できる場合は、`KQL_BODY` に `.kql` 本文を、`COLUMNS` に対応する配列を入力する。KQL 本文入力欄には JSON の外側の引用符や `\n` を貼らず、改行された本文を使う。**Actual value が編集不可の場合は次のコードビューを使い、Default value だけを変更して代替しない。** 外側の設定値がある場合、既定値を変更しても実際の値は置き換わらない。
 4. パラメーター画面から編集できない場合は **開発ツール → ロジック アプリ コード ビュー**で、外側の `parameters.KQL_BODY.value` と `parameters.COLUMNS.value` を変更する。JSON 文字列では改行・引用符のエスケープが必要なため、対応する `.json` の **この 2 項目だけ**を転記する。`MONTH_OVERRIDE` は試験対象月を別途指定する。
 
    **列の名前・数・順序が変わる場合は追加で**、デザイナーの `Export → Create_CSV_table` を開き、**列 / Columns をカスタム / Custom**にする。ヘッダーと対応する値の式を `COLUMNS` と同じ順で設定する。コードビューの場合は `definition.actions.Export.actions.Create_CSV_table.inputs.columns` を、対応する `.csv-columns.json` の配列で置き換える。他の入力や `runAfter` を消さない。たとえば操作別集計は次の配列を使う。
@@ -178,11 +233,17 @@ datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterNa
 
 5. `definition.parameters` は型・既定値の定義なので、実設定と混同しない。`LAW_RESOURCE_ID`、`STORAGE_ACCOUNT_NAME`、`$connections`、期間計算アクションは保持する。設定 JSON 全体で置き換えて実 ID をプレースホルダーへ戻したり、ワークフロー定義全体を上書きしたりしない。
 6. 保存前にエディターへフォーカスし、KQL・列・対象月・接続を含む全文が意図どおりであることを確認する。貼付で旧内容が残ったり JSON が二重になったりした場合は修正し、自動保存エラーがないことを確認してから **Publish** する。公開成功通知と、再表示した値・型・カスタム列を確認する。Draft 自動保存だけで完了としない。Query の時間範囲は **Set in query** を維持する。
-7. 将来の開始日時と次回予定を確認後、手動で 1 回だけ実行する。実行履歴の `QueryText` で今回公開した KQL と期間が実行されたことを確認する。[受入確認](validation.md)に従い、列、件数、CSV の保存・読み戻し、manifest / current、最終状態を記録する。有効化直後の反映待ち・再試行の注意も同手順に従う。
+7. 将来の開始日時と次回予定を確認後、[手動実行](validation.md#b-月次を待たずに手動実行する)の1～3に従って有効化し、1回だけ実行する。実行履歴の `QueryText` で今回公開したKQLと期間を確認し、**そのKQL用の期待値**で列・件数・保存・読み戻し・manifest / currentを照合する。Perfの実データがない場合は§3.2を使い、共通3列ダミーの設定・期待値に戻さない。
 8. 問題があれば無効化して控えた KQL・列・対象月へ戻し、再度 Publish して確認する。ネットワーク公開・キー認証や検査削除で回避しない。
 9. 合格後は本番 KQL と列を維持し、`MONTH_OVERRIDE` を **空文字**へ戻して Publish する。承認した月初業務日の次回予定を確認してから有効化する。評価のままなら無効で保持する。
 
 実行履歴の `QueryText` 出力で、ワークフローが付加した UTC の `start` / `end` と実際の KQL を確認できます。Log Analytics のログ画面で事前確認する場合は、UTC の期間宣言を別途付けた試験用コピーを使います。試験用の宣言を `KQL_BODY` に戻さないでください。履歴・クエリには機密情報が含まれ得るため、共有先と権限に注意します。
+
+![KQL切替時にコードビューの入口とトリガー設定を確認する](images/code-view-schedule.png)
+
+![変更後にPublishし公開成功の通知を確認する](images/publish-confirmation.png)
+
+**切替操作の例：** コードビューではKQL・COLUMNSの**外側の実値**と、CSVアクションの**内側のカスタム列**を別々に更新します。画像は定義の先頭と公開通知の例です。実値・型・CSV列はPublish後の再表示まで確認します。
 
 ## 5. 複数KQLを1つのStorage Accountへ保存する
 
@@ -270,6 +331,10 @@ CSV名は自動で `lawexp-perf-memory_<対象月>_<実行日時JST>.csv`、curr
 7. 合格したワークフローごとに本番KQL、空の `MONTH_OVERRIDE`、承認した開始日時・次回予定を確認して有効化する。すべてのワークフローを毎月手動で切り替える必要はない。監視・再実行もKQLごとに行う。
 
 同じワークフローのKQLを書き換えると、引き続き **そのワークフローの月別current** を更新します。別の業務成果物として毎月残すKQLは、新しいワークフローにしてください。ワークフロー名を変えると保存先も変わります。KQL・列・対象月・ワークフロー名・run IDを台帳で対応付けます。
+
+![別KQLの追加時は第2段階で新規ワークフロー名と共通Storage・LAWを指定する](images/workflow-review.png)
+
+**追加時の入力例：** ③workflowNameだけは用途別の新しい一意の名前、Storage / LAWは共通基盤の同じ値です。画像の3列は初回ダミーの例なので、追加KQLの本文・列・対象月は入力シートとそのKQL用の手順に合わせます。第3段階の権限も新しいMIに対して実施します。
 
 分離は上書き・取り違えを防ぐための論理分離で、アクセス権の分離ではありません。各MIには共通exportsのContributorを付与するため、他のプレフィックスへの操作も権限上可能です。相互のアクセス禁止が要件なら、コンテナー別RBAC等を別途設計します。1ワークフロー内の一括実行、複数ワークフロー間の一括完了・全体排他は実装していません。
 

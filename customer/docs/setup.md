@@ -28,6 +28,10 @@ Storage の Public network access は初回から **Disabled** にします。�
 
 空の既定テンプレートのまま進めず、貼り付けたリソース・パラメーターが表示されたことを確認してください。
 
+![カスタムデプロイの基本画面でサブスクリプション・専用RG・リージョン・prefix・保持日数を確認する](images/template-basics.png)
+
+**画面例：** テンプレート全文を保存した後の「基本」です。①対象サブスクリプション・専用RG、②その段階の入力、③確認と作成の順に進みます。第2・3段階も同じ入口を使います。
+
 公式：[portal から ARM テンプレートをデプロイ](https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/deploy-portal)。
 
 ## 2. 第 1 段階：Storage と評価用 LAW
@@ -57,6 +61,18 @@ Storage の Public network access は初回から **Disabled** にします。�
 
 出力名は `storageAccountName` / `lawName` / `lawResourceId` / `exportsContainerResourceId` です。
 
+![第1段階の確認と作成で4つのリソースと入力を確認して作成する](images/foundation-review.png)
+
+**画面例：** 第1段階の「確認と作成」。①Storage・Blobサービス・exports・LAWの4リソースと入力を確認し、②作成します。他の段階ではリソース数・入力が異なります。
+
+![デプロイの出力からStorage名・LAW名・LAW ID・exports IDを控える](images/foundation-outputs.png)
+
+**画面例：** デプロイ成功後に①出力を開き、②各値を台帳へ控えて次の段階へ転記します。画像の伏せ字を入力値として使用しないでください。
+
+![StorageのJSONビューでDisabled・共有キーと匿名アクセス無効・AzureServices・Deny・HTTPSを確認する](images/storage-security.png)
+
+**確認の補助：** Storageの概要 → **JSON ビュー**でも `properties.publicNetworkAccess`、`allowBlobPublicAccess`、`allowSharedKeyAccess`、`networkAcls`、`supportsHttpsTrafficOnly` を参照できます。赤枠①～④を上の必須値と照合します。JSONビューは参照専用で、設定変更やアクセス制限の解除に使いません。
+
 Storage ブラウザーでデータが見えないことを、コンテナーの作成失敗と即断しません。管理プレーンでのコンテナー存在確認と、データプレーンのアクセスは別です。
 
 ## 3. 第 2 段階：Consumption と管理接続
@@ -82,6 +98,20 @@ Storage ブラウザーでデータが見えないことを、コンテナーの
 
 Monitor LogsとBlobはMI認証の**管理コネクタ**です。接続はテンプレートが作成し、ワークフローの `$connections` に設定します。
 
+![第2段階の確認と作成で新規ワークフロー名・共通StorageとLAW・将来開始日時・ダミー列を確認する](images/workflow-review.png)
+
+**画面例：** 第2段階の確認。`workflowName`は新しい一意の名前、Storage / LAWは第1段階の出力、開始日時は承認済みの将来日時です。画像の3列は初回接続確認用ダミーの例です。
+
+![初期状態DisabledとEnableボタンの位置を確認する](images/initial-disabled.png)
+
+**画面例：** 作成直後の概要。②StatusがDisabledであることを確認し、第3段階の権限確認まで①Enableを押しません。
+
+![Monitor Logs管理接続のJSONでV1とmanagedIdentityAuthを確認する](images/connector-logs-mi.png)
+
+![Blob管理接続のJSONでV1とmanagedIdentityAuthを確認する](images/connector-blob-mi.png)
+
+**認証の確認例：** 各API接続の概要 → JSON ビューで①`kind: V1`、②`parameterValueSet.name: managedIdentityAuth`を参照します。ユーザーのサインインやキー認証へ切り替えず、システムMIであることはLogic AppのID画面と合わせて確認してください。
+
 公式：[Consumption の portal 管理](https://learn.microsoft.com/en-us/azure/logic-apps/quickstart-create-example-consumption-workflow)、[MI 認証と接続 ARM](https://learn.microsoft.com/en-us/azure/logic-apps/authenticate-with-managed-identity)、[Recurrence の初回実行](https://learn.microsoft.com/en-us/azure/connectors/connectors-native-recurrence)。
 
 ## 4. 第 3 段階：アプリ MI の権限
@@ -95,13 +125,37 @@ Monitor LogsとBlobはMI認証の**管理コネクタ**です。接続はテン�
 
 出力の `blobRoleAssignmentId` / `lawRoleAssignmentId` を台帳に控え、実際の割り当て先が第 2 段階の `workflowPrincipalId` と一致することを確認します。
 
+![第3段階の確認画面で今回のワークフロー名と共通Storage・LAWを照合する](images/access-review.png)
+
+**画面例：** 第3段階の入力照合。画像では作成ボタンが無効ですが、検証成功後に有効になるのを待ちます。有効にならない場合はエラーを確認して停止し、強制操作しません。
+
+![IAMでロールの割り当てタブを開き役割とMI名で絞り込む](images/iam-role-filters.png)
+
+**画面例：** 絞り込み前のIAMです。①ロールの割り当て、②必要な役割、③そのワークフローのMI名で検索します。exportsではStorage Blob Data Contributor、LAWではLog Analytics Readerを選び、対象MIとスコープを確認します。別のユーザーや継承ロールの表示だけで合格にしません。
+
 公式：[Blob データのロール割り当て](https://learn.microsoft.com/en-us/azure/storage/blobs/assign-azure-role-data-access)。
 
 ## 5. パラメーターと保存内容の確認
 
 Logic App の **パラメーター**、または **ロジック アプリ コード ビュー**で定義と値を確認します。画面名は portal の版で異なります。`definition.parameters` は型・既定値、外側の `parameters` は設定値です。部分 JSON で定義全体や `$connections` を消さないでください。
 
+パラメーター画面の **Actual value** が編集不可の場合はコードビューを使います。外側に設定値があるパラメーターは、**Default value だけを変更しても実際の値を変更できません。**
+
 **開発ツール → ロジック アプリ コード ビュー**で変更する場合は、変更前の全文を控え、外側の `parameters.<名前>.value` を編集して **Publish** します。**Draftの自動保存だけでは反映完了としません。** 公開成功と再表示した値を確認し、試験直前までDisabledを維持します。
+
+`MONTH_OVERRIDE` を空文字へ戻した後、公開済みコードで外側の設定が省略される場合は、`definition.parameters.MONTH_OVERRIDE.defaultValue` が空文字で、外側に対象月の非空の設定値が残っていないことを確認します。設定値が省略された場合は既定値が使われます（[公式のパラメーター仕様](https://learn.microsoft.com/en-us/azure/logic-apps/workflow-definition-language-schema#parameters)）。
+
+![コードビューの入口とRecurrenceのタイムゾーン・将来開始日時・同時実行1を確認する](images/code-view-schedule.png)
+
+**画面例：** ①コードビューを開き、②タイムゾーン・将来の開始日時、③同時実行1を確認します。画像は定義の先頭です。KQLの貼り付け先はこの範囲ではなく外側の `parameters.KQL_BODY.value` で、定義全体をKQL本文で上書きしません。
+
+![公開済みJSONの外側parametersでCOLUMNSの4列・KQL本文・対象月を照合する](images/published-parameters.png)
+
+**公開後の確認例：** 概要 → JSON ビューの外側 `parameters` です。①COLUMNS、②KQL_BODY、③対象月を照合します。画像はPerf用4列で、初回ダミーは上の表の3列を使います。JSONビューは参照専用であり、値の編集はコードビューで行います。
+
+![PublishボタンとSuccessfully saved workflowの通知を確認する](images/publish-confirmation.png)
+
+**画面例：** ①Publish後に②公開成功通知を確認し、公開済みの値を再表示します。自動保存の表示だけで試験を開始しないでください。
 
 | ワークフローパラメーター | 用途 |
 |---|---|

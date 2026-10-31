@@ -24,6 +24,12 @@
 
 同時実行数は 1 を維持します。履歴からの再送・別ワークフロー・接続先変更まで排他が保証されたものではありません。定期予定と重ならない作業枠で操作し、手動実行を重ねません。
 
+![対象月の手動実行では外側MONTH_OVERRIDEのvalueを変更する](images/month-override-test.png)
+
+![概要のRunから公開済みワークフローを1回だけ実行する](images/normal-run.png)
+
+**操作例：** 対象月を設定・Publishして再表示した後、将来の予定とRunningなしを確認して概要のRun → Runを使います。画像の`2026-01`は例で、台帳の対象月を指定します。
+
 ## 3. CSV の取得と完了判定
 
 ```text
@@ -46,6 +52,12 @@ CSVの保存・読み戻し一致を確認してからmanifestを保存し、最
 2. 対象月・runId・期間・RowCount と manifest / current の保存結果を確認する。
 3. 読み戻しを含む実行の Succeeded と、独立した取得による current / manifest の確認は区別する。
 
+![保存後のBlob読み戻しと本文一致チェックの成功を確認する](images/readback-success.png)
+
+![manifest保存後のUpload Current成功とワークフロー別のcurrent.jsonを確認する](images/current-publication.png)
+
+**実行内の確認例：** CSV読み戻し・本文一致を確認した後、manifestとUpload Currentの成功を確認します。画像のフォルダーパスの伏せ字は、ご自身のワークフロー・月と照合してください。これは実行履歴の確認であり、独立したcurrent / manifest / CSV取得の代わりではありません。
+
 ### CSV ファイルを取得する条件
 
 **信頼されたサービスの例外は、操作者のブラウザーを許可しません。** データ RBAC があっても、Public Disabled の Storage の CSV を通常の端末から portal で直接取得できるとは限りません。
@@ -61,6 +73,18 @@ CSVの保存・読み戻し一致を確認してからmanifestを保存し、最
 5. CSV 対応ソフトで列順・論理件数・全値・BOM を確認する。改行数で件数を数えない。数式・日付の自動解釈を避ける。
 
 取得したCSVの本文・文字コード・サイズと、連携先で必要なContent-Type等を確認します。実行履歴のJSONを表示・保存したことを、CSVファイルの取得成功と扱わないでください。
+
+![StorageブラウザーでEntraユーザー認証とexports内のワークフローフォルダーを確認する](images/storage-browser-entra.png)
+
+**取得操作の入口：** ①BLOBコンテナー → exports、②Microsoft Entraユーザーアカウント認証、③目的のワークフローフォルダーです。そこから対象月のcurrent.jsonを開き、**そのpath**のmanifestと**そのcsvFileName**のCSVへ進みます。
+
+![保存済みCSVのダウンロードボタンを使用する](images/blob-download.png)
+
+**取得するファイルを照合した後：** ダウンロードを使用します。削除やSASの生成へ進みません。ダウンロードの受付だけでなく、実ファイルを保存できたことと本文を確認してください。
+
+![CSVの内容例でPerfダミーの固定4列と平均20・50を照合する](images/perf-csv-preview.png)
+
+**内容例：** 画像はPerfダミーの4列・2行です。ご自身のKQLの列・件数・全値と照合します。これらの画像は操作・内容の例で、**Public DisabledのStorageへ通常端末からアクセスできることの証明ではありません。** 承認済み経路が成立しなければ停止し、Public有効化・キー・SASで回避しません。BOMや特殊文字は画面だけで合格にせず、取得したCSVで確認します。
 
 公式：[portal の Blob データ認証と権限](https://learn.microsoft.com/en-us/azure/storage/blobs/authorize-data-operations-portal)、[ネットワーク制限と portal のデータ操作](https://learn.microsoft.com/en-us/azure/storage/common/storage-network-security-limitations)。
 
@@ -97,3 +121,9 @@ CSVの保存・読み戻し一致を確認してからmanifestを保存し、最
 5. 削除成功通知と、元のRG画面を再読み込みした対象RGの「見つかりません」を確認する。サブスクリプションのリソース一覧と必要なスコープのロール割り当ても確認し、今回作成分の残存有無を台帳へ記録する。課金画面が即時0であることを完了条件にしない。
 
 共有資源が混在するRGは丸ごと削除しません。台帳で今回作成したConsumption・専用接続・Storage・評価用LAW・権限だけを特定し、承認済みの範囲を個別に削除します。失敗時も削除範囲を広げません。
+
+![専用RG削除の画面で対象RGと全リソースを照合し承認済みRG名を入力する](images/delete-scope.png)
+
+![専用RGだけを廃止する承認後に削除の最終確認を行う](images/delete-confirm.png)
+
+**専用評価環境を全て廃止する場合だけの画面例：** 対象一覧と台帳を照合し、RG名を入力して検証・ボタンの有効化を待ち、最終確認へ進みます。画像の灰色の無効ボタンを強制操作しません。継続利用する既存・共有RGや、一部KQLだけの廃止にはこのRG全体削除を使わないでください。
