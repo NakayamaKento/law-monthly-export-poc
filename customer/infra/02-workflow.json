@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "6707413194767790860"
+      "templateHash": "4459551305138557384"
     }
   },
   "parameters": {
@@ -23,8 +23,11 @@
     "storageAccountName": {
       "type": "string"
     },
-    "lawName": {
-      "type": "string"
+    "lawResourceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Full ARM resource ID of an existing Log Analytics workspace in the same tenant. This deployment does not create or modify the workspace."
+      }
     },
     "startTime": {
       "type": "string",
@@ -786,7 +789,7 @@
             "value": "[parameters('monthOverride')]"
           },
           "LAW_RESOURCE_ID": {
-            "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('lawName'))]"
+            "value": "[parameters('lawResourceId')]"
           },
           "STORAGE_ACCOUNT_NAME": {
             "value": "[parameters('storageAccountName')]"

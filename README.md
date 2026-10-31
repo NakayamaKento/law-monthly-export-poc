@@ -13,7 +13,7 @@ Logic Apps **Consumption** の月次 Recurrence で前月のログを取得し�
 
 [KQLの設定・追加](customer/docs/query-patterns.md)では、業務KQLと固定列、Perf日次CPU平均などの例、追加時のARM入力とportal操作を説明しています。貼り付け用 `.kql` と `.csv-columns.json` を同梱し、実データなしでもダミー試験ができます。通常運用はJST前月を自動計算します。
 
-共通基盤は保存用Storage 1とexports、評価用LAW 1。KQLごとにConsumption 1、API接続2、アプリMIのロール2を追加します。基盤の第1段階は1回だけ、第2・3段階をKQLごとに実施します。
+取得元は既存LAWを使い、新規作成・保持／取り込み／ネットワーク設定の変更・削除を行いません。共通の新規保存基盤はStorage 1とexportsです。KQLごとにConsumption 1、API接続2、アプリMIのロール2を追加します。第1段階は1回だけ、第2・3段階をKQLごとに実施し、両段階の`lawResourceId`へ既存LAWのARM IDを指定します。LAWが別RG・別サブスクリプションの場合も、第3段階の内包子テンプレートが既存LAWスコープのReaderだけを付与します。LAW側のRGへのデプロイ権限と接続は導入先で受入確認します。
 
 保存先は `exports/<workflowName>/<YYYY-MM>/...`、CSV名は `<workflowName>_<対象月>_<実行日時yyyyMMdd-HHmmss>-JST.csv`。実行フォルダーには衝突防止用の完全な実行IDを保持します。[追加KQLの入力対応表と例](customer/docs/query-patterns.md#5-複数kqlを1つのstorage-accountへ保存する)を参照してください。
 
@@ -31,7 +31,7 @@ Logic Apps **Consumption** の月次 Recurrence で前月のログを取得し�
 | [コンテキスト](docs/CONTEXT.md) | 現在の要件・判断・未検証点 |
 | [設計・検証記録](docs/plan.md) | §22 が Consumption 切替、§23 が portal 実構築、§26 が固定列順版の実機確認、§27 がPerf対応・複数KQLの保存先分離、§28 がCSV命名・KQL追加手順、§30 が新命名・複数KQL版の実機確認と削除。§1～§21 は過去の計画・実績 |
 
-顧客向け資料には現行方式の操作・仕様・受入条件だけを記載します。検討過程・過去方式・検証の詳細な時系列は提供者向けの設計・検証記録に保持し、customerから参照させません。現行版のAzure実機確認と環境削除の記録はdocs/plan.md §30、今回の資料整理は§31を参照してください。
+顧客向け資料には現行方式の操作・仕様・受入条件だけを記載します。検討過程・過去方式・検証の詳細な時系列は提供者向けの設計・検証記録に保持し、customerから参照させません。新命名版のAzure実機確認と環境削除はdocs/plan.md §30、最終方式への資料整理は§31、既存LAWを参照する今回の資材・手順は§37、**同一サブスクリプション・別RGの既存LAWを使ったPortal実機検証と未確認範囲・後片付けの引き継ぎは§39**を参照してください。
 
 ## 公開根拠
 

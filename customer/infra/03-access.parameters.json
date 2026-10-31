@@ -8,8 +8,8 @@
     "storageAccountName": {
       "value": "<STORAGE_ACCOUNT_NAME>"
     },
-    "lawName": {
-      "value": "<LAW_NAME>"
+    "lawResourceId": {
+      "value": "/subscriptions/<LAW_SUBSCRIPTION_ID>/resourceGroups/<LAW_RESOURCE_GROUP>/providers/Microsoft.OperationalInsights/workspaces/<LAW_NAME>"
     }
   }
 }

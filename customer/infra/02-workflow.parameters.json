@@ -11,8 +11,8 @@
     "storageAccountName": {
       "value": "<STORAGE_ACCOUNT_NAME>"
     },
-    "lawName": {
-      "value": "<LAW_NAME>"
+    "lawResourceId": {
+      "value": "/subscriptions/<LAW_SUBSCRIPTION_ID>/resourceGroups/<LAW_RESOURCE_GROUP>/providers/Microsoft.OperationalInsights/workspaces/<LAW_NAME>"
     },
     "startTime": {
       "value": "2026-12-05T09:00:00"

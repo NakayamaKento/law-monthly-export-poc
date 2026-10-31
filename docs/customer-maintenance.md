@@ -16,7 +16,9 @@ customerには現行Consumptionの構成・3段階導入・ダミーテスト・
 | [Consumption 定義](../logicapp/monthly-export/definition.json) | [配布定義](../customer/logicapp/monthly-export/definition.json)。第 2 段階 ARM にも同梱 |
 | [settings/](../settings/) の設定 JSON | [customer/settings/](../customer/settings/) の同名 JSON、`KQL_BODY.value` を取り出した `.kql`、`COLUMNS` 配列順の `.csv-columns.json` |
 
-ARM の入力例と Markdown は直接保守します。生成済み定義・ARM を手修正せず、正本を直して再生成してください。外部テンプレートリンクや実環境 ID、ユーザーパス、資格情報を同梱しません。
+ARMの入力例は [build-customer.mjs](../scripts/build-customer.mjs) の段階別パラメーターから生成し、Markdownは直接保守します。生成済み定義・ARM・入力例を手修正せず、正本を直して再生成してください。外部テンプレートリンクや実環境ID、ユーザーパス、資格情報を同梱しません。
+
+取得元は既存LAWです。第1段階はStorage・Blobサービス・exportsの3リソースだけを作成し、LAWの作成・設定変更を行いません。第2・3段階は同じ `lawResourceId` を受け取ります。[law-access.bicep](../infra/customer/law-access.bicep) は第3段階へ内包される権限専用モジュールで、LAWのARM IDからサブスクリプション・RG・名前を取得し、対象LAWのLog Analytics Readerだけを付与します。顧客が投入するARMは3ファイルのまま、外部リンクや4つ目の投入は不要です。別スコープのデプロイ権限・MI接続・後片付けはPortal実機で別途受入確認します。
 
 KQL パターンの正本は sample / azureactivity / azureactivity-failures / azureactivity-summary / perf-cpu-daily の設定 JSON です。改行は JSON の `\n` で保持し、顧客用 `.kql` は生成します。追加・変更時は [顧客向け変更ガイド](../customer/docs/query-patterns.md)の一覧・列・期待値と、`customer.test.mjs` のパターン一覧・応答フィクスチャも更新してください。ハーネスは KQL エンジンではなく、実テーブル用の例では応答を注入して CSV 契約を検査します。KQL の実行結果を保証しません。
 
@@ -43,7 +45,7 @@ git --no-pager diff --check
 
 1. 現行手順に対応する画面だけを選び、操作場所の画像と成功結果・参照専用画面を区別する。3列ダミー、Perfの4列、0件、置換前の例を本文とキャプションで明示する。
 2. サインイン情報、サブスクリプション／テナント／リソース／run ID、接続識別子、実リソース名、IP、実ログ、署名付きURL・応答ヘッダーをトリミングまたは不透明な矩形で除去する。ぼかしや可逆なレイヤーだけで隠さず、RGB画像へ合成してPNGのEXIF・コメント・プロファイル等も除去する。
-3. 赤枠と番号はキー名・値・操作ボタンを隠さない位置に付ける。伏せ字は見本で、顧客がそのまま投入する値ではないことを明記する。本文のJSON / KQL・期待値を正とする。
+3. 赤枠と番号はキー名・値・操作ボタンを隠さない位置に付ける。伏せ字は見本で、顧客がそのまま投入する値ではないことを明記する。本文のJSON / KQL・期待値を正とする。入力や削除対象が変わった場合は、画面の旧項目・リソース数・LAW作成／削除に見える一覧も除外し、現在も一致する操作箇所を抜粋する。画面の数値や項目名を描き換えて新構成の実測と見せない。
 4. 加工後の全画像を目視し、ローカルOCRでも残存情報を確認する。画像・ログを外部OCRへ送らない。今回はWindows内蔵の日本語OCRで公開用31画像を検査した。
 5. 各画像を該当する手順の近くへ埋め込み、`customer.test.mjs` の画面対応表を更新する。試験は孤立画像・不足画像・相対リンク・PNGの不透明RGB／メタデータ／画素データを確認するが、匿名化の目視／OCRを代替しない。
 
@@ -53,6 +55,7 @@ Storageブラウザー・CSVプレビュー・ダウンロードボタンの画�
 
 - Consumption は `Microsoft.Logic/workflows`、システム MI、初期 Disabled。管理接続 2 個は V1。Standard の V2 / host.json / connections.json / `appsetting()` / ServiceProvider を再導入しない。
 - 3 段階は新規基盤 → 無効状態のワークフロー・接続 → RBAC。設定・権限が揃うまで有効化しない。
+- 既存LAWは作成・設定変更・削除しない。ダミー行はdatatable内で生成する。LAWのARM IDは第2・3段階で共通、GUIDと混同しない。LAW側のRGへ内包した権限用子デプロイだけを許容し、完全モードや外部テンプレートリンク、広域ロールを追加しない。LAW側の今回のロールと子デプロイ履歴は専用RG外の後片付け対象として台帳へ残す。
 - Storage は初回から PNA Disabled、Deny、AzureServices、Shared Key false、匿名 false、TLS 1.2 / HTTPS。接続失敗時に公開化・キー認証で穴埋めしない。
 - exports の Blob Data Contributor と LAW の Log Analytics Reader のみ。ホストロールやユーザー割り当て MI は不要。
 - ワークフローのパラメーターに KQL・列・対象月・対象 LAW・Storage 名を置く。ARM が `$connections` を設定し、ユーザーのサインイン・シークレットを不要にする。

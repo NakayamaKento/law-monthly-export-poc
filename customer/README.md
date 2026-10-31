@@ -4,7 +4,7 @@ Logic Apps **Consumption（従量課金）**で前月のログを日本時間の
 
 ## 本サンプルの使い方
 
-**1つのStorage Account・`exports`コンテナーを共有し、KQLごとに1つのワークフローを作成します。** 基盤の第1段階は1回だけ、第2・3段階をKQLごとに実施します。通常は `MONTH_OVERRIDE=""` でJSTの前月を自動計算するため、月の日数に合わせた変更は不要です。
+**ログ取得元は既存のLog Analyticsワークスペース（LAW）を使用します。** LAWを新規作成せず、保持日数・ログ取り込み・ネットワーク設定を変更しません。**1つのStorage Account・`exports`コンテナーを共有し、KQLごとに1つのワークフローを作成します。** 保存基盤の第1段階は1回だけ、第2・3段階をKQLごとに実施します。通常は `MONTH_OVERRIDE=""` でJSTの前月を自動計算するため、月の日数に合わせた変更は不要です。
 
 CSVの列順はカスタム列で固定します。KQL本文は `KQL_BODY`、出力列は `COLUMNS` とCSVアクションのカスタム列に指定します。保存先は `exports/<workflowName>/<YYYY-MM>/...`、CSV名は **`<workflowName>_<対象月>_<実行日時yyyyMMdd-HHmmss>-JST.csv`** です。最新のCSVはワークフロー・月ごとの `current.json` から参照します。
 
@@ -23,7 +23,7 @@ Storage は初回から **Public network access: Disabled / Deny / AzureServices
 
 | 配布資材 | 用途 |
 |---|---|
-| [基盤 ARM](infra/01-foundation.json) / [入力例](infra/01-foundation.parameters.json) | 保存用 Storage、exports、評価用 LAW |
+| [基盤 ARM](infra/01-foundation.json) / [入力例](infra/01-foundation.parameters.json) | 保存用 Storage、exports。LAWは作成しない |
 | [ワークフロー ARM](infra/02-workflow.json) / [入力例](infra/02-workflow.parameters.json) | 無効状態の Consumption と MI 管理接続 2 個 |
 | [権限 ARM](infra/03-access.json) / [入力例](infra/03-access.parameters.json) | アプリ MI の Blob / LAW ロール |
 | [ワークフロー定義](logicapp/monthly-export/definition.json) | 定義の参照用。初回構築と接続設定はARMを使用 |
@@ -38,7 +38,7 @@ flowchart LR
   Operator["操作者 / Azure portal<br/>管理 RBAC"]
   App["Logic Apps Consumption<br/>KQLごとに1個 / システム割り当て MI"]
   Monitor["管理接続 1<br/>Azure Monitor Logs"]
-  LAW["Log Analytics Workspace<br/>公開クエリ / MI 認可"]
+  LAW["既存 Log Analytics Workspace<br/>公開クエリ / MI 認可"]
   Transform["組み込み<br/>期間計算・検証・CSV"]
   Blob["管理接続 2<br/>Azure Blob Storage"]
   Storage["Storage / exports<br/>Public Disabled + 信頼されたサービスの例外<br/>Shared Key / 匿名アクセス無効"]
@@ -54,10 +54,10 @@ flowchart LR
 | Logic App Consumption | KQLごとに1個。各々の月次 Recurrence と実行履歴、システム MI |
 | 保存用 Storage / exports | アカウント 1 個、コンテナー 1 個 |
 | 管理 API 接続 | ワークフローごとに2個。Monitor Logs と Blob |
-| Log Analytics Workspace（LAW） | 1 個。本一式は隔離した評価用を作成 |
+| Log Analytics Workspace（LAW） | 既存の1個を参照。新規作成・設定変更・削除をしない |
 | アプリ MI のデータ権限 | ワークフローごとのMIにLAWのLog Analytics Reader、exportsのStorage Blob Data Contributor |
 
-本一式は専用RGに評価用LAWを作成します。本番の取得元・権限・接続設定は別途確認し、評価用LAWを無断で置換しません。
+保存基盤とワークフローは新規の専用RGへ作成し、既存LAWはそのまま利用します。[導入手順](docs/setup.md#1-評価用-rg-と入力の準備)で既存LAWの**ARMリソースID**を控え、第2・3段階の `lawResourceId` に同じ値を指定します。ワークスペースGUIDではありません。同じテナント内の別RG・別サブスクリプションのLAWもIDで指定でき、権限用の子テンプレートは第3段階ARMに内包しています。導入先のデプロイ権限・MI接続は受入確認が必要です。ダミー試験でも既存LAWを使いますが、ダミーデータはKQL内で生成し、ログを取り込みません。**後片付けで既存LAWを削除しません。**
 
 ## 設計上の制限
 
