@@ -259,7 +259,7 @@ Manifestの**出力**と実行されたQueryTextを次の期待値へ照合し�
 
 ![Create CSV tableのOutputで4列と平均20・50を確認する](images/kql-output-two.png)
 
-**今回の操作画面例：** ManifestのrowCountは2です。Create CSV tableのOutputでヘッダーと2行の平均を確認できますが、これはCSV生成結果です。**保存成功は別に**Read Back CSVの実BodyとCheck Read Back CSVのSucceeded、Manifestの`csvReadBackVerified=true`を確認します。Outputの表示上の折り返しはデータ行の追加ではありません。
+**今回の操作画面例：** ManifestのrowCountは2です。Create CSV tableのOutputでヘッダーと2行の平均を確認できますが、これはCSV生成結果です。**保存成功は別に**Read Back CSVの実BodyとCheck Read Back CSVのSucceeded、Manifestの`csvReadBackVerified=true`を確認します。Check Read Back CSVは空または不一致を検出する条件です。詳細の`expressionResult=false`はその条件に当てはまらず、本文が一致したことを示す正常値です。`true`の場合は空または不一致を検出した分岐へ進みます。Outputの表示上の折り返しはデータ行の追加ではありません。
 
 ![Perfダミーのmanifestで数値rowCountが2であることを確認する](images/perf-manifest.png)
 

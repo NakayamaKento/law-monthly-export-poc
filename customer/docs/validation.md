@@ -118,7 +118,7 @@ CSV名は `<workflowName>_2026-01_<開始日時yyyyMMdd-HHmmss>-JST.csv` です�
 
 ![Read Back CSVの200応答とCheck Read Back CSVの本文一致成功を確認する](images/readback-success.png)
 
-**保存確認の画面例：** ①保存後のRead Back CSV、②本文一致のCheck Read Back CSV、③読み戻しの200応答を確認します。200だけでは十分ではありません。列・件数・全値は上の3列ダミーの期待値と照合し、操作者によるCSV取得とは区別します。
+**保存確認の画面例：** ①保存後のRead Back CSV、②本文一致のCheck Read Back CSV、③読み戻しの200応答を確認します。Check Read Back CSVの詳細で`expressionResult=false`と表示されるのは、空または不一致を検出する条件に当てはまらなかった正常値です。200だけでは十分ではありません。列・件数・全値は上の3列ダミーの期待値と照合し、操作者によるCSV取得とは区別します。
 
 ### D. 0件・翌月境界・再実行
 
