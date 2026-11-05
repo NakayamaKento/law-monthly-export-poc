@@ -18,7 +18,7 @@
 | 出力列は同じで抽出条件だけ変える | §2の例A、§4 | KQL_BODYだけ。対象月の指定は必要時のみ |
 | 別KQLを既存KQLと並行して定期実行する | §5 | 別ワークフローを追加。既存ワークフローを上書きしない |
 
-**編集する場所は「概要 → Edit → Code」です。** 概要の「JSON ビュー」と実行履歴の「Code preview」は参照専用です。「パラメーター」画面のActual valueが灰色の場合も、そこで入力せずCodeを使います。
+**編集する場所は「概要 → Edit → Code」です。** 「パラメーター」画面のActual value、概要の「JSON ビュー」、実行履歴の「Code preview」は参照専用です。Default valueだけを書き換えても、外側に設定されたActual valueは変わりません。
 
 ![無効化したLogic Appの概要からEditを開く](images/kql-overview-edit.png)
 
@@ -320,6 +320,14 @@ Disabled・Runningなしを確認し、Codeで外側 `parameters.MONTH_OVERRIDE.
 
 **顧客が開発した別のKQLも、原文を1つのJSON文字列にして、外側の `parameters.KQL_BODY.value` へ設定します。** JSON化はKQLの内容を変更する作業ではありません。先に§3.3の月範囲・出力列・最後の `bag=pack_all()` を合わせ、改行された原文を控えてから変換します。ローカルコマンドやCloud Shellは不要です。業務KQLや実データを外部のJSON変換サイトへ貼り付けないでください。
 
+#### 最初に設定方法を選ぶ
+
+1. **同梱ダミーのKQLを使うだけ**なら、この変換は不要です。[Perfダミー手順](#32-perf-の実データがない場合の試験)など、引用符付きのJSON文字列が用意されている場合はその文字列をそのままコピーします。
+2. 顧客独自のKQLへ変更する場合は、概要 → **Edit → Code**でJSONを編集し、以下の説明に従います。**Actual valueは参照専用**なので、Parameters画面の値やDefault valueは変更しません。
+3. JSONの括弧や値の場所が分からない、または変換後の文字列に自信がない場合は、Publishせずそこで止めてLogic Apps管理者またはKQL作成者に確認してください。Code全体をKQLで貼り替えたり、設定を推測で変更したりしません。
+
+以下は3の場合の案内です。JSONを普段編集しない方が、Code全体の構造を変更する必要はありません。KQL値だけを正確に差し替えます。
+
 #### 変換する文字と順序
 
 | KQL原文にある文字 | CodeのJSON文字列内での書き方 |
@@ -360,7 +368,7 @@ datatable(TimeGenerated:datetime, Path:string, Text:string)
 "datatable(TimeGenerated:datetime, Path:string, Text:string)\n[\n  datetime(2026-01-15T00:00:00Z), @\"C:\\logs\\sample.txt\", '処理 \"完了\"'\n]\n// 対象月のデータだけを出力\n| where TimeGenerated >= start and TimeGenerated < end\n| project TimeGenerated, Path, Text\n| project bag=pack_all()"
 ```
 
-概要 → Edit → Codeで、外側 `parameters.KQL_BODY` の `"value":` の後の**既存文字列全体（開始・終了の `"` を含む）だけ**を上の文字列へ置き換えます。`"value":` と外側の括弧・区切りのカンマは保持します。すでにJSON化された文字列をコピーする場合は追加の変換をしません。上の1行をワークフロー全体や `definition.parameters` へ貼り付けないでください。
+概要 → Edit → Codeで、検索欄から `KQL_BODY` を探します。同じ名前が複数表示されたら、前半の「型・既定値」ではなく、`definition` の後ろ側にある **`"parameters"` の `KQL_BODY`**を選びます。`"value":` の後の**既存文字列全体（開始・終了の `"` を含む）だけ**を上の文字列へ置き換えます。`"value":` と外側の括弧・区切りのカンマは保持します。すでにJSON化された文字列をコピーする場合は追加の変換をしません。上の1行をワークフロー全体や `definition.parameters` へ貼り付けないでください。差し替える範囲が判別できない場合は保存・Publishせず、管理者へ確認します。
 
 この例を試す場合、外側 `parameters.COLUMNS.value` は次の配列です。JSON文字列にせず配列の型を維持します。
 
@@ -390,10 +398,8 @@ datatable(TimeGenerated:datetime, Path:string, Text:string)
 
 1. Logic App を **Disabled** にし、Running がないことを確認する。現在の KQL、列、対象月、有効状態、公開済みの定義全体を台帳へ控える。
 2. 対象パターンの `.kql` と対応する `COLUMNS` を上表から選ぶ。まず試験対象月を `MONTH_OVERRIDE` に指定する。
-3. Logic App の **パラメーター**画面で実際の値を編集できる場合は、`KQL_BODY` に `.kql` 本文を、`COLUMNS` に対応する配列を入力する。KQL 本文入力欄には JSON の外側の引用符や `\n` を貼らず、改行された本文を使う。**Actual value が編集不可の場合は次のコードビューを使い、Default value だけを変更して代替しない。** 外側の設定値がある場合、既定値を変更しても実際の値は置き換わらない。
-4. パラメーター画面から編集できない場合は **概要 → Edit → Code**で、外側の `parameters.KQL_BODY.value` と `parameters.COLUMNS.value` を変更する（開発ツール → ロジック アプリ コード ビューが表示される版ではそこからも編集可）。同梱例は対応する `.json` の **この2項目の値だけ**を転記する。**顧客独自のKQLは[§3.4](#34-自作kqlをjson文字列にする)でJSON文字列へ変換する。** `MONTH_OVERRIDE` は試験対象月を別途指定する。
-
-   **列の名前・数・順序が変わる場合は追加で**、デザイナーの `Export → Create_CSV_table` を開き、**列 / Columns をカスタム / Custom**にする。ヘッダーと対応する値の式を `COLUMNS` と同じ順で設定する。コードビューの場合は `definition.actions.Export.actions.Create_CSV_table.inputs.columns` を、対応する `.csv-columns.json` の配列で置き換える。他の入力や `runAfter` を消さない。たとえば操作別集計は次の配列を使う。
+3. **概要 → Edit → Code**で、外側の `parameters.KQL_BODY.value` と `parameters.COLUMNS.value` を変更する（開発ツール → ロジック アプリ コード ビューが表示される版ではそこからも編集可）。同梱例は対応する `.json` の **この2項目の値だけ**を転記する。**顧客独自のKQLは[§3.4](#34-自作kqlをjson文字列にする)でJSON文字列へ変換する。** `MONTH_OVERRIDE` は試験対象月を別途指定する。Parameters画面は値の確認用で、Actual valueは編集できません。
+4. **列の名前・数・順序が変わる場合は追加で**、デザイナーの `Export → Create_CSV_table` を開き、**列 / Columns をカスタム / Custom**にする。ヘッダーと対応する値の式を `COLUMNS` と同じ順で設定する。コードビューの場合は `definition.actions.Export.actions.Create_CSV_table.inputs.columns` を、対応する `.csv-columns.json` の配列で置き換える。他の入力や `runAfter` を消さない。たとえば操作別集計は次の配列を使う。
 
    ```json
    [
