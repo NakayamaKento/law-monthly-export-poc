@@ -30,6 +30,8 @@ Azure Log Analytics の前月ログを毎月 5 日 09:00 JST に抽出し、CSV 
 
 **既存の手作業環境でKQL変更手順を再検証（2026-11-05 JST）**：利用者が初回ダミーとHourlyトリガーを試した既存環境の続きをPortalで実施。初期公開JSONとStorageを保全して一時Disabledとし、顧客§3.2の全文Perfダミー・4列へ変更した。通常Runで2行／平均20・50／187バイト、月だけ変えた0行／55バイトの実保存読み戻しが全バイト一致。元の3列・対象月・接続・MI・トリガー予定へ戻してPublish、有効化後の4行／233バイトも成功した。最終Enabled、definition・全parameters・identityは初期と完全一致、Storageの全Resource JSONも初期と一致。元のHour / 1を保持し、作成・削除・NW・LAW・接続・RBAC変更なし。Storageは利用者の初期設定がPNA Enabled / Deny / AzureServices・IP許可あり・キー／匿名無効で、今回をDisabled条件の証明にしない。新UIのActual value非編集、内外parametersとKQLのJSON文字列、CSVカスタム列、Publish・通常Run・結果・復元を顧客手順へ具体化した。新規29画面のうち匿名化した14画像を追加し、顧客画像は計45点。生画像・実体・対応表は非公開。詳細と未検証範囲は§40参照。
 
+**自作KQLのJSON記法ガイダンス（2026-11-05 JST）**：顧客手順§3.4へ、改行・引用符・バックスラッシュ・タブの変換表と変換順序、KQL原文とJSONの対応例、列・対象月・公開後の照合方法を追加。KQL内の既存エスケープ、コメント、逐語的文字列を保持し、JSON・KQL・CSVの表記を区別した。掲載JSONの復号と原文の完全一致、応答注入によるQueryText・CSV・読み戻しの静的検査を追加し27試験成功。今回は資料と静的検査のみで、Azure環境の変更・Run・追加撮影は行っていない。§41参照。
+
 ## 要件と制約
 
 - 顧客操作は **Azure portal のみ**。CLI、Cloud Shell、ローカルコマンド、Run Command を求めない。

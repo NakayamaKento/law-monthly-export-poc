@@ -53,6 +53,8 @@ Storageブラウザー・CSVプレビュー・ダウンロードボタンの画�
 
 `query-patterns.md` §3.2のPerfダミーは、複数行KQL本文とCodeへ貼る引用符付きJSON文字列の両方を更新します。`customer.test.mjs` はJSON文字列の復号結果と掲載KQL全文の完全一致、および既存のvalue位置へ貼り付けたJSONの妥当性を検査します。外側パラメーターの値だけの変更とCSVカスタム列の変更を区別し、Default valueや参照専用JSONビューを編集先として案内しません。
 
+§3.4の自作KQLの例も原文・JSON・COLUMNS・CSVカスタム列を一緒に更新します。テストは改行・引用符・バックスラッシュ・コメント・日本語の保持と、応答注入時のQueryText／CSVを確認します。KQL自体の構文実行やAzure保存の実測とは分け、資料更新だけで既存環境のPublish・Runを行いません。
+
 ## 移行で守る契約
 
 - Consumption は `Microsoft.Logic/workflows`、システム MI、初期 Disabled。管理接続 2 個は V1。Standard の V2 / host.json / connections.json / `appsetting()` / ServiceProvider を再導入しない。
