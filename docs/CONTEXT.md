@@ -28,6 +28,8 @@ Azure Log Analytics の前月ログを毎月 5 日 09:00 JST に抽出し、CSV 
 
 **指定LAWでの実機検証（2026-11-01 JST、機能確認完了・削除は利用者担当）**：新規作成承認後、既存LAWの全JSONとIAMの継承66件／直接0件を事前保全し、新規専用RGへ現行3段階ARMをPortalから投入して全段階成功。同一サブスクリプション・別RGの既存LAWとexportsへのMI限定2ロールを実画面で確認した。ダミー4件（実CSV 233バイト）、0件（固定ヘッダー26バイト）、列不整合のSchemaMismatch・両Uploadスキップ、正常復元4件の通常Runを確認。Draftの同時実行設定／一部inputs欠落によるPublish拒否は公開済み全文の復元で解消し、その保持・復元手順を顧客資料へ追加した。復元後の全定義・パラメーター・MIは初期と一致し、最終Disabled／Running 0件。StorageのDisabled・キー／匿名無効等を最後まで維持し、既存LAWの全JSONも試験前後で一致した。新規46画面等を非公開保全、静的26試験・配布一致・リンク・diff検査成功。同日07:39 JSTに利用者が削除を担当すると回答し、専用RGとRG外の今回Reader 1件／子デプロイ履歴の後片付けを引き継いだ。エージェントによる削除は行わず、削除実施・残存確認の結果は未受領。今回の独立CSV取得・異常直後currentの実バイト比較・1件月・Perf・別サブスクリプションは未検証。実ID・環境名・生画像はGitへ入れない。§39参照。
 
+**既存の手作業環境でKQL変更手順を再検証（2026-11-05 JST）**：利用者が初回ダミーとHourlyトリガーを試した既存環境の続きをPortalで実施。初期公開JSONとStorageを保全して一時Disabledとし、顧客§3.2の全文Perfダミー・4列へ変更した。通常Runで2行／平均20・50／187バイト、月だけ変えた0行／55バイトの実保存読み戻しが全バイト一致。元の3列・対象月・接続・MI・トリガー予定へ戻してPublish、有効化後の4行／233バイトも成功した。最終Enabled、definition・全parameters・identityは初期と完全一致、Storageの全Resource JSONも初期と一致。元のHour / 1を保持し、作成・削除・NW・LAW・接続・RBAC変更なし。Storageは利用者の初期設定がPNA Enabled / Deny / AzureServices・IP許可あり・キー／匿名無効で、今回をDisabled条件の証明にしない。新UIのActual value非編集、内外parametersとKQLのJSON文字列、CSVカスタム列、Publish・通常Run・結果・復元を顧客手順へ具体化した。新規29画面のうち匿名化した14画像を追加し、顧客画像は計45点。生画像・実体・対応表は非公開。詳細と未検証範囲は§40参照。
+
 ## 要件と制約
 
 - 顧客操作は **Azure portal のみ**。CLI、Cloud Shell、ローカルコマンド、Run Command を求めない。

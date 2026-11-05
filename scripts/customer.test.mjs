@@ -276,6 +276,13 @@ test('documented Perf switch preserves four-column exports with injected query r
   assert.deepEqual(arrays[1], delivered('settings/perf-cpu-daily.csv-columns.json'));
   const section = guide.match(/### 3\.2[\s\S]*?(?=### 3\.3)/)[0];
   const kql = section.match(/```kusto\r?\n([\s\S]*?)```/)[1].replaceAll('\r\n', '\n').trim();
+  const codeValue = section.match(/```json\r?\n([\s\S]*?)```/);
+  assert(codeValue, 'Provide an escaped JSON string for the Code editor, not only multiline KQL');
+  const pastedKql = JSON.parse(codeValue[1]);
+  assert.equal(typeof pastedKql, 'string');
+  assert.equal(pastedKql, kql, 'Code-editor JSON value must decode to exactly the documented dummy KQL');
+  const editExample = JSON.parse(`{"KQL_BODY":{"value":${codeValue[1].trim()}}}`);
+  assert.equal(editExample.KQL_BODY.value, kql, 'Copying the quoted value must produce valid parameter JSON');
   assert(kql.startsWith('datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterName:string, CounterValue:real)'));
   assert.equal(kql.slice(kql.indexOf('\n| where')), canonical.KQL_BODY.value.slice('Perf'.length));
   const rows = [...kql.matchAll(/datetime\(([^)]+)\),\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*([\d.]+)/g)]
@@ -752,7 +759,7 @@ test('customer guides stay within the delivery and exclude implementation histor
 test('customer screenshots cover the procedures without orphan images or embedded metadata', () => {
   const directory = resolve(customer, 'docs/images');
   const images = files(directory);
-  assert(images.length >= 31, 'Keep screenshots for the setup, testing, KQL and operational procedures');
+  assert(images.length >= 45, 'Keep screenshots for the setup, testing, KQL and operational procedures');
   assert(images.every(path => path.endsWith('.png')), 'Deliver only processed PNG screenshots');
   const required = {
     'setup.md': ['template-basics', 'foundation-review', 'foundation-outputs', 'storage-security',
@@ -762,7 +769,10 @@ test('customer screenshots cover the procedures without orphan images or embedde
       'readback-success', 'zero-manifest', 'schema-mismatch', 'upload-csv-skipped'],
     'query-patterns.md': ['published-parameters', 'csv-columns-reference', 'perf-manifest',
       'perf-csv-preview', 'perf-zero-preview', 'month-override-empty', 'code-view-schedule',
-      'publish-confirmation', 'workflow-review'],
+      'publish-confirmation', 'workflow-review', 'kql-overview-edit', 'kql-editor-code',
+      'kql-actual-value-readonly', 'kql-outer-parameters', 'kql-custom-columns', 'kql-draft-diff',
+      'kql-publish-saved', 'kql-run-menu', 'kql-run-history', 'kql-action-search',
+      'kql-manifest-two', 'kql-output-two', 'kql-zero-month', 'kql-manifest-zero'],
     'operations.md': ['month-override-test', 'normal-run', 'readback-success', 'current-publication',
       'storage-browser-entra', 'blob-download', 'perf-csv-preview', 'delete-scope', 'delete-confirm'],
   };
