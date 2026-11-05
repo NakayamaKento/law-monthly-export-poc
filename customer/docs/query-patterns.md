@@ -6,6 +6,25 @@
 
 複数の業務KQLを毎月実行する場合は、**KQLごとに別の Consumption ワークフロー**を作り、同じ Storage Account と `exports` コンテナーを使います。Blob名を `<ワークフロー名>/<対象月>/...` に分け、CSVだけでなく manifest と current も独立させます。構築は[本書 §5](#5-複数kqlを1つのstorage-accountへ保存する)に従います。1つのワークフローで複数KQLを一括処理する方式ではありません。
 
+## 0. ダミー実行が終わったら、ここから始める
+
+**初回の3列ダミーが成功した環境で、実データなしでKQL変更を試す場合は、[§3.2の手順1](#手順1-停止して公開済み設定を控える)から順に進めます。** 新しいRG・LAW・Storage・接続の作成やARMの再投入は不要です。3列・4行のダミーを、Perf形式の**4列・2行・平均20 / 50**へ切り替えます。
+
+| やりたいこと | 読む場所 | 変更するもの |
+|---|---|---|
+| 実データなしで、列も変わるKQLへの切り替えを試す | §3.2 | KQL_BODY、COLUMNS、CSVカスタム列、試験対象月 |
+| Perfテーブルの実データを取得する | §3.1、試験後の§3.2手順7 | 本番KQLと4列設定。対象テーブル・権限・保持期間を確認 |
+| 出力列は同じで抽出条件だけ変える | §2の例A、§4 | KQL_BODYだけ。対象月の指定は必要時のみ |
+| 別KQLを既存KQLと並行して定期実行する | §5 | 別ワークフローを追加。既存ワークフローを上書きしない |
+
+**編集する場所は「概要 → Edit → Code」です。** 概要の「JSON ビュー」と実行履歴の「Code preview」は参照専用です。「パラメーター」画面のActual valueが灰色の場合も、そこで入力せずCodeを使います。
+
+![無効化したLogic Appの概要からEditを開く](images/kql-overview-edit.png)
+
+![Edit画面でWorkflowからCodeへ切り替える](images/kql-editor-code.png)
+
+**入口の画面例：** 上の画像のEditを押し、次の画面のCodeを選びます。無効化後の概要ではEnableが表示されます。編集画面のRun draftは使いません。
+
 ## 1. 月ごとに変更しない設定
 
 | 項目 | 通常運用の設定・動作 |
@@ -130,14 +149,33 @@ CSVアクションのカスタム列も同じ順にします。[配布用の配�
 
 既存の3列ダミーからPerfへ切り替える場合も、以下の手順を使います。**[共通ダミーテスト](validation.md#2-実データ不要のダミーテスト)のAに戻って設定し直さないでください。** 本試験は4列・2行で、共通ダミーの3列・4件とは期待値が異なります。
 
-1. Logic Appを **Disabled** にし、Runningがないことを確認する。公開済み定義・パラメーター・開始日時・接続を控える。
-2. 次の設定とKQL本文を合わせて変更する。コードビューでは外側の `parameters.<名前>.value` を編集し、KQL本文だけでエディター全体を置き換えない。`LAW_RESOURCE_ID`、`STORAGE_ACCOUNT_NAME`、`$connections` は保持する。
+#### 手順1 停止して公開済み設定を控える
+
+Logic Appの概要で **Disable** を押し、**Refresh → Status: Disabled**、実行履歴にRunningがないことを確認します。有効なまま編集すると、変更途中の設定で定期実行されるおそれがあります。
+
+概要 → **JSON ビュー**で公開済みJSONを全文控えます。`properties.definition`、`properties.parameters`、元のEnabled / Disabled、Recurrenceの頻度・間隔・開始日時・タイムゾーン・同時実行1を保全します。JSONビューは参照用です。閉じて **Edit → Code**へ進みます。
+
+**1時間ごとのトリガーを試験中なら、KQL変更のために月次へ戻す必要はありません。** Hour / 1を含む元の予定を維持し、作業中だけ停止します。月次への復帰は手順7で別に判断します。
+
+![Actual valueが編集不可のパラメーター画面](images/kql-actual-value-readonly.png)
+
+**ここには貼り付けません：** Actual valueは灰色の参照値です。上のDefault valueを変更しても、外側にActual valueが設定されていれば実行値は変わりません。パラメーターの名前・型も変更せず、パネルを閉じてCodeへ戻ります。
+
+#### 手順2 外側parametersの3つの値を変更する
+
+Codeには `parameters` が**2か所**あります。前半の **`definition.parameters`（type / defaultValue）ではなく、`definition` の閉じ括弧の後にある外側の `parameters`（value）**を編集します。Ctrl+Endで末尾へ移動して少し上へスクロールすると見つけやすくなります。Ctrl+Fで検索する場合は、Findへ入力後に **next** を押し、検索された場所の前後を確認します。
+
+次の3つの **`value`の値だけ**を変更します。外側parameters全体やエディター全体をサンプルJSONで置き換えません。`LAW_RESOURCE_ID`、`STORAGE_ACCOUNT_NAME`、`$connections` は実環境の値を保持します。
 
 | 変更箇所 | 設定値 |
 |---|---|
-| `MONTH_OVERRIDE` | `2026-01` |
-| `COLUMNS` | 配列 `["TimeGenerated","_ResourceId","Computer","AvgCounterValue"]` |
-| `Create_CSV_table.inputs.columns` | [perf-cpu-daily.csv-columns.json](../settings/perf-cpu-daily.csv-columns.json)の4列配列。コードビューでは `definition.actions.Export.actions.Create_CSV_table.inputs.columns` |
+| 外側 `parameters.COLUMNS.value` | 配列 `["TimeGenerated","_ResourceId","Computer","AvgCounterValue"]` |
+| 外側 `parameters.KQL_BODY.value` | 以下のダミーKQL全文。Codeに貼る場合は、その下のJSON文字列を使用 |
+| 外側 `parameters.MONTH_OVERRIDE.value` | 文字列 `"2026-01"` |
+
+![definitionの外側にあるparametersのCOLUMNSとKQL_BODYとMONTH_OVERRIDEを変更する](images/kql-outer-parameters.png)
+
+**貼り付け位置：** ①外側parameters、②COLUMNS.valueの配列、③KQL_BODY.valueの文字列、④MONTH_OVERRIDE.valueです。画像のKQLは横に長く、先頭しか見えていません。全文は以下を使います。
 
 `KQL_BODY` には**次の全文**を貼り付けます。datatableだけで終わらず、時間条件・カウンター条件・集計・project・bagまで含めます。先頭の `Perf` を残して二重にしないでください。
 
@@ -156,8 +194,53 @@ datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterNa
 | project bag=pack_all()
 ```
 
-3. **Publish**成功後、KQL・4列のCOLUMNS・4列のカスタム列・対象月を再表示して確認する。Queryの時間範囲は **Set in query**、開始日時は承認済みの将来日時、タイムゾーンは **Tokyo Standard Time**、同時実行数は1を維持する。
-4. [手動実行](validation.md#b-月次を待たずに手動実行する)の1～3（有効化・1回実行・履歴確認）を行い、実行されたQueryTextと次の期待値を照合する。同節の3列ダミー用「RowCount=4」は使わない。
+**Codeへ貼り付けるJSON文字列（上のKQLと同じ内容）：** 既存の `KQL_BODY` の `"value":` の後にある**文字列を、開始の `"` から終了の `"` まで**選択し、次の1行で置き換えます。`"value":`、その前後の `{ }`、後ろのカンマは残します。引用符と改行をエスケープ済みなので、上の複数行KQLをJSONの引用符内へ直接貼り付ける必要はありません。
+
+```json
+"datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterName:string, CounterValue:real)\n[\n  datetime(2026-01-15T00:10:00Z), \"/sample-resource\", \"sample-computer\", \"% Processor Time\", 10.0,\n  datetime(2026-01-15T00:20:00Z), \"/sample-resource\", \"sample-computer\", \"% Processor Time\", 30.0,\n  datetime(2026-01-16T00:10:00Z), \"/sample-resource\", \"sample-computer\", \"% Processor Time\", 50.0,\n  datetime(2026-01-15T00:30:00Z), \"/sample-resource\", \"sample-computer\", \"Other Counter\", 999.0\n]\n| where TimeGenerated >= start and TimeGenerated < end\n| where CounterName == \"% Processor Time\"\n| summarize AvgCounterValue=avg(CounterValue) by _ResourceId, Computer, bin(TimeGenerated, 1d)\n| project TimeGenerated, _ResourceId, Computer, AvgCounterValue\n| project bag=pack_all()"
+```
+
+`.kql` は生のKQL本文、上のJSON文字列はCode用です。`\n` はJSON上の改行表現で、実行時のKQLには改行として渡されます。`sample.json`や`perf-cpu-daily.json`は参考値であり、接続を含むワークフロー全体ではありません。
+
+#### 手順3 CSVアクションのカスタム列を4列にする
+
+**COLUMNSだけの変更では未完了です。** Code内で `Create_CSV_table` を検索し、`definition.actions.Export.actions.Create_CSV_table.inputs.columns` の **`[` から対応する `]` までの配列だけ**を、[perf-cpu-daily.csv-columns.json](../settings/perf-cpu-daily.csv-columns.json)の全文へ置き換えます。§3.1にも同じ配列を掲載しています。
+
+`inputs.from`、`format: "CSV"`、`runAfter` は保持します。旧 `Id` / `Text` が残っていないこと、TimeGenerated / _ResourceId / Computer / AvgCounterValueの順で、各headerとvalueの列名が一致することを確認します。
+
+![編集用CodeのCreate_CSV_tableでinputs.columnsを4列へ置き換える](images/kql-custom-columns.png)
+
+**配列の範囲：** ①Create_CSV_table、②inputs.columnsの開始 `[`、③4列のheader / value、④終了 `]`。これは編集用Codeの画面で、実行履歴の参照専用Code previewではありません。
+
+#### 手順4 Publishして公開済みの値を再確認する
+
+変更前の控えと照合し、上の3値とCSV列以外を変更していないことを確認します。**Show draft diff**は比較の補助です。キーの並び替えや`evaluatedRecurrence`の表示差も出るため、色だけで予定変更と判断せず、recurrenceの頻度・間隔・開始日時・タイムゾーンと同時実行1の値を照合します。アクションのinputsなどが欠落していれば公開せず、[公開済み全文からの復元](setup.md#5-パラメーターと保存内容の確認)を行います。
+
+![Show draft diffで元のトリガー設定と変更後の値を照合する](images/kql-draft-diff.png)
+
+**比較例：** 1時間ごとの既存設定を保持した画面です。この画像を根拠に月次運用をHourへ変更するものではありません。
+
+**Publish**を押し、通知の **Successfully saved workflow**を確認します。Autosaved / Draftは公開完了ではありません。
+
+![Publish後のSuccessfully saved workflow通知を確認する](images/kql-publish-saved.png)
+
+概要へ戻り、Refresh後のJSONビューで**公開済み**のKQL・4列のCOLUMNS・4列のCSVカスタム列・対象月2026-01を再表示します。公開済みJSONでは `properties.parameters` と `properties.definition.actions` の下にあります。Queryの時間範囲 **Set in query**、元のトリガー予定・Tokyo Standard Time・同時実行1、MI接続も保持していることを確認し、試験直前までDisabledにします。
+
+#### 手順5 公開済みワークフローを1回実行する
+
+概要で **Enable**を押し、反映後に **Run → Run**を1回だけ押します。Edit画面のRun draftやアクション単体の再送は使いません。Runが無効ならRefreshし、状態と通知を確認します。要求が失敗した場合は、履歴に新しいrunがないことを確認してから再試行し、連打しません。
+
+![概要のRunメニューで通常のRunを選択する](images/kql-run-menu.png)
+
+実行履歴をRefreshし、**いま開始した行**のSucceededを確認して開きます。古い3列ダミーの成功行を見ないでください。実行が終了したら、一旦概要でDisableに戻すと、結果確認中や次の設定変更中の定期実行を防げます。
+
+![実行履歴で新しい実行のSucceededと開始日時を確認する](images/kql-run-history.png)
+
+実行画面の **Search workflow actions（虫眼鏡）**を押し、「操作の検索」で **Manifest**、**Create CSV table**、**Read Back CSV**を選びます。見つからなければ検索欄にアクション名を入力します。詳細パネルを閉じてから次のアクションを選びます。
+
+![実行画面の操作の検索で確認するアクションを選ぶ](images/kql-action-search.png)
+
+Manifestの**出力**と実行されたQueryTextを次の期待値へ照合します。3列ダミー用の「RowCount=4」は使いません。
 
 | 確認箇所 | Perfダミーの期待値 |
 |---|---|
@@ -171,15 +254,35 @@ datatable(TimeGenerated:datetime, _ResourceId:string, Computer:string, CounterNa
 
 行順は保証しないため、日時・リソース・コンピューターで照合します。日時は小数部を含むUTC表記となる場合があります。操作者によるファイル取得は[承認済みの取得経路](operations.md#3-csv-の取得と完了判定)で別途確認します。
 
+![Perfダミー実行のManifestで対象月とrowCountが2であることを確認する](images/kql-manifest-two.png)
+
+![Create CSV tableのOutputで4列と平均20・50を確認する](images/kql-output-two.png)
+
+**今回の操作画面例：** ManifestのrowCountは2です。Create CSV tableのOutputでヘッダーと2行の平均を確認できますが、これはCSV生成結果です。**保存成功は別に**Read Back CSVの実BodyとCheck Read Back CSVのSucceeded、Manifestの`csvReadBackVerified=true`を確認します。Outputの表示上の折り返しはデータ行の追加ではありません。
+
 ![Perfダミーのmanifestで数値rowCountが2であることを確認する](images/perf-manifest.png)
 
 ![PerfダミーCSVで固定4列と2行の平均20・50を確認する](images/perf-csv-preview.png)
 
 **Perfの結果例：** manifestは`rowCount=2`、CSVは固定4列・平均20 / 50の2行です。CSV画像はダミーの**内容例**であり、取得経路・NW条件やBOMの確認を証明するものではありません。導入先では承認済み経路で実ファイルを確認します。
 
-5. 無効化・Runningなしを確認し、`MONTH_OVERRIDE` **だけ**を `2025-11` にしてPublish・手動実行する。KQLと4列設定は変えず、0行・BOM＋上記4列ヘッダー＋CRLF、数値rowCount=0を確認する。
-6. 列不整合も試す場合は、無効化して対象月を `2026-01` へ戻し、COLUMNSは正しいまま**カスタム列だけ逆順**にする。Publish・実行後にFailed / SchemaMismatch、Upload CSV / Upload CurrentのSkippedを確認する。無効化し、正しいカスタム列へ戻してPublish・再実行し、2行・平均20 / 50の成功へ復元する。
-7. 終了時は無効化し、`KQL_BODY` を§3.1の **Perfから始まる全文**、`MONTH_OVERRIDE` を空文字へ戻してPublishする。COLUMNSとカスタム列は4列を維持する。実テーブルの存在・権限・データ・結果の受入前は無効のままにし、ダミーKQLのまま月次運用を開始しない。
+#### 手順6 0件と正常復元を確認する
+
+Disabled・Runningなしを確認し、Codeで外側 `parameters.MONTH_OVERRIDE.value` **だけ**を `"2025-11"` にしてPublishします。KQLと4列設定は変えません。手順4～5と同じ公開値の確認・通常Runを行い、0行・BOM＋上記4列ヘッダー＋CRLF、数値rowCount=0、読み戻し成功を確認します。
+
+![0件試験では外側MONTH_OVERRIDEのvalueだけを2025-11へ変更する](images/kql-zero-month.png)
+
+![0件試験のManifestでmonthとrowCountが0であることを確認する](images/kql-manifest-zero.png)
+
+0件の確認後、無効化し、対象月だけ `"2026-01"` へ戻せば同じPerfダミーの2行試験に戻れます。KQL・COLUMNS・CSV列を3列ダミーへ戻す必要はありません。
+
+**列不整合も試す場合だけ：** 無効化して対象月を2026-01へ戻し、COLUMNSは正しいまま**カスタム列だけ逆順**にします。Publish・実行後にFailed / SchemaMismatch、Upload CSV / Upload CurrentのSkippedを確認します。無効化し、正しいカスタム列へ戻してPublish・再実行し、2行・平均20 / 50の成功へ復元します。
+
+#### 手順7 試験前へ戻すか、本番Perfへ進む
+
+**試験前の3列ダミー環境へ戻す場合：** 無効化し、手順1で控えた `properties.definition` をCodeの `definition`、`properties.parameters` を外側 `parameters` へ戻してPublishします。公開済みJSONを控えと照合し、元のKQL・3列・対象月・接続・トリガー予定を確認します。元がEnabledなら、設定復元後に有効化します。1時間ごとの試験を続ける場合も、元のHour / 1を維持します。公開済みのリソースJSON全体をCodeへ貼らないでください。
+
+**本番Perfへ進む場合：** 無効化し、KQL_BODYを§3.1の **Perfから始まる全文**、MONTH_OVERRIDEを空文字へ戻してPublishします。COLUMNSとカスタム列は4列を維持します。Codeでは[perf-cpu-daily.json](../settings/perf-cpu-daily.json)の `KQL_BODY.value` の**引用符付きJSON文字列だけ**をコピーして、外側 `parameters.KQL_BODY.value` の文字列だけを置き換えます。ファイル全体やエスケープされていない生KQLを貼りません。実テーブルの存在・権限・保持期間・データ・結果の受入前は無効のままにし、ダミーKQLのまま本番運用を開始しません。Hourly試験をしていた場合は、**本番運用開始前に**毎月5日09:00 JSTなど承認済みの月次予定へ戻し、将来の開始日時・次回予定・同時実行1を確認します。
 
 ![Perfの0件CSVでも固定4列のヘッダーが残ることを確認する](images/perf-zero-preview.png)
 

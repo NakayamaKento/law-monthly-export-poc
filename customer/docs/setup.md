@@ -148,7 +148,9 @@ Logic App の **パラメーター**、または **ロジック アプリ コー
 
 パラメーター画面の **Actual value** が編集不可の場合はコードビューを使います。外側に設定値があるパラメーターは、**Default value だけを変更しても実際の値を変更できません。**
 
-**開発ツール → ロジック アプリ コード ビュー**で変更する場合は、変更前の全文を控え、外側の `parameters.<名前>.value` を編集して **Publish** します。**Draftの自動保存だけでは反映完了としません。** 公開成功と再表示した値を確認し、試験直前までDisabledを維持します。
+**編集入口は概要 → Edit → Code**です。開発ツール → ロジック アプリ コード ビューが表示される版では、そこからも変更できます。変更前の全文を控え、外側の `parameters.<名前>.value` を編集して **Publish** します。**Draftの自動保存だけでは反映完了としません。** 公開成功と再表示した値を確認し、試験直前までDisabledを維持します。概要のJSONビューと実行履歴のCode previewは参照専用です。
+
+**3列ダミーの実行が成功し、別KQLへの変更を試す場合は、[Perf形式ダミーへの変更手順](query-patterns.md#手順1-停止して公開済み設定を控える)を順に実施します。** 編集画面・外側parameters・KQLのJSON文字列の貼り付け範囲・CSVカスタム列・Publish・通常Run・結果確認を画像付きで説明しています。COLUMNSとCSVアクションのカスタム列は別設定で、列変更時は両方を合わせます。
 
 概要の **Edit → Code**からもコードビューを開けます。変更前に概要 → **JSON ビュー**で**公開済み**の `properties.definition` と `properties.parameters` を控えてください。Draftとの差分では、変更する値以外に各アクションの `inputs`、接続参照、トリガーの `runtimeConfiguration.concurrency.runs: 1`、予定が欠落していないことを確認します。欠落しているDraftは公開しません。コードビューの `definition` に保全した `properties.definition`、外側の `parameters` に `properties.parameters` を戻してから、必要な値だけを編集します。**リソースJSON全体の `id` / `type` / `properties` を編集用JSONへ貼り付けないでください。** 同時実行設定の削除を理由にPublishが拒否された場合も、設定を削除・無効化せずこの方法で保持します。公開後のJSONビューで変更対象と保持対象を再確認してください（[トリガーの同時実行設定](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-actions-triggers#change-trigger-concurrency)）。
 
