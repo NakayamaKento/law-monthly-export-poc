@@ -152,6 +152,8 @@ Logic App の **パラメーター**、または **ロジック アプリ コー
 
 **3列ダミーの実行が成功し、別KQLへの変更を試す場合は、[Perf形式ダミーへの変更手順](query-patterns.md#手順1-停止して公開済み設定を控える)を順に実施します。** 編集画面・外側parameters・KQLのJSON文字列の貼り付け範囲・CSVカスタム列・Publish・通常Run・結果確認を画像付きで説明しています。COLUMNSとCSVアクションのカスタム列は別設定で、列変更時は両方を合わせます。
 
+同梱例ではなく顧客が開発したKQLを使う場合は、[自作KQLをJSON文字列にする](query-patterns.md#34-自作kqlをjson文字列にする)を参照してください。改行された原文と、Codeに貼り付けるエスケープ済み文字列を区別します。
+
 概要の **Edit → Code**からもコードビューを開けます。変更前に概要 → **JSON ビュー**で**公開済み**の `properties.definition` と `properties.parameters` を控えてください。Draftとの差分では、変更する値以外に各アクションの `inputs`、接続参照、トリガーの `runtimeConfiguration.concurrency.runs: 1`、予定が欠落していないことを確認します。欠落しているDraftは公開しません。コードビューの `definition` に保全した `properties.definition`、外側の `parameters` に `properties.parameters` を戻してから、必要な値だけを編集します。**リソースJSON全体の `id` / `type` / `properties` を編集用JSONへ貼り付けないでください。** 同時実行設定の削除を理由にPublishが拒否された場合も、設定を削除・無効化せずこの方法で保持します。公開後のJSONビューで変更対象と保持対象を再確認してください（[トリガーの同時実行設定](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-actions-triggers#change-trigger-concurrency)）。
 
 `MONTH_OVERRIDE` を空文字へ戻した後、公開済みコードで外側の設定が省略される場合は、`definition.parameters.MONTH_OVERRIDE.defaultValue` が空文字で、外側に対象月の非空の設定値が残っていないことを確認します。設定値が省略された場合は既定値が使われます（[公式のパラメーター仕様](https://learn.microsoft.com/en-us/azure/logic-apps/workflow-definition-language-schema#parameters)）。

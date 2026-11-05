@@ -267,6 +267,48 @@ test('customer KQL patterns keep the monthly window and match their documented o
   assert.deepEqual(perf.COLUMNS.value, ['TimeGenerated', '_ResourceId', 'Computer', 'AvgCounterValue']);
 });
 
+test('documented custom KQL JSON preserves newlines, quotes, backslashes, comments and Unicode', () => {
+  const section = read('customer/docs/query-patterns.md').match(/### 3\.4[\s\S]*?(?=## 4\.)/)[0];
+  const kql = section.match(/```kusto\r?\n([\s\S]*?)```/)[1].replaceAll('\r\n', '\n').trim();
+  const [quotedValue, columns, csvColumns] = [...section.matchAll(/```json\r?\n([\s\S]*?)```/g)]
+    .map(match => match[1]);
+  const decoded = JSON.parse(quotedValue);
+  assert.equal(decoded, kql);
+  assert.equal(decoded, [
+    'datatable(TimeGenerated:datetime, Path:string, Text:string)',
+    '[',
+    '  datetime(2026-01-15T00:00:00Z), @"C:\\logs\\sample.txt", \'処理 "完了"\'',
+    ']',
+    '// 対象月のデータだけを出力',
+    '| where TimeGenerated >= start and TimeGenerated < end',
+    '| project TimeGenerated, Path, Text',
+    '| project bag=pack_all()',
+  ].join('\n'));
+  const settings = structuredClone(sample);
+  Object.assign(settings, JSON.parse(`{"KQL_BODY":{"value":${quotedValue.trim()}}}`));
+  settings.COLUMNS.value = JSON.parse(columns);
+  assert.deepEqual(settings.COLUMNS.value, ['TimeGenerated', 'Path', 'Text']);
+  const workflow = structuredClone(definition);
+  workflow.actions.Export.actions.Create_CSV_table.inputs.columns = JSON.parse(csvColumns);
+  assert.deepEqual(JSON.parse(csvColumns), settings.COLUMNS.value.map(name => ({
+    header: name, value: `@item()['${name}']`,
+  })));
+  const result = runWorkflow(workflow, settings, {
+    runId: 'custom-json',
+    queryResponse: { value: [{ bag: {
+      TimeGenerated: '2026-01-15T00:00:00Z', Path: 'C:\\logs\\sample.txt', Text: '処理 "完了"',
+    } }] },
+  });
+  assert.equal(result.status, 'Succeeded', result.error?.stack);
+  assert.equal(result.outputs.QueryText,
+    `let start=datetime(2025-12-31T15:00:00); let end=datetime(2026-01-31T15:00:00); ${kql}`);
+  const saved = storedRun(result);
+  assert.equal(saved.csv.toString('utf8'),
+    '\uFEFFTimeGenerated,Path,Text\r\n2026-01-15T00:00:00Z,C:\\logs\\sample.txt,"処理 ""完了"""\r\n');
+  assert.equal(saved.manifest.rowCount, 1);
+  assert.equal(saved.manifest.csvReadBackVerified, true);
+});
+
 test('documented Perf switch preserves four-column exports with injected query responses', () => {
   const guide = read('customer/docs/query-patterns.md');
   const setup = guide.match(/### 3\.1[\s\S]*?(?=### 3\.2)/)[0];

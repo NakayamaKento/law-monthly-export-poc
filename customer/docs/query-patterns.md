@@ -13,6 +13,7 @@
 | やりたいこと | 読む場所 | 変更するもの |
 |---|---|---|
 | 実データなしで、列も変わるKQLへの切り替えを試す | §3.2 | KQL_BODY、COLUMNS、CSVカスタム列、試験対象月 |
+| 自作KQLをJSONへ書き換えて設定する | §3.3、[§3.4](#34-自作kqlをjson文字列にする) | 月範囲・出力列を合わせ、改行・引用符・バックスラッシュをJSON用に変換 |
 | Perfテーブルの実データを取得する | §3.1、試験後の§3.2手順7 | 本番KQLと4列設定。対象テーブル・権限・保持期間を確認 |
 | 出力列は同じで抽出条件だけ変える | §2の例A、§4 | KQL_BODYだけ。対象月の指定は必要時のみ |
 | 別KQLを既存KQLと並行して定期実行する | §5 | 別ワークフローを追加。既存ワークフローを上書きしない |
@@ -41,7 +42,7 @@
 
 ## 2. パターンを選ぶ
 
-`.kql` は **KQL_BODY の入力欄にそのまま貼る本文**です。`.json` は KQL と列を対にしたワークフローパラメーターの参考設定です。ファイルを置くだけで自動選択される仕組みではありません。
+`.kql` は **改行された生のKQL本文**です。編集可能なKQL本文入力欄にはそのまま使えますが、**CodeのJSON文字列内へは直接貼りません**。`.json` は KQL と列を対にしたワークフローパラメーターの参考設定です。Codeではその引用符付きの値を使います。自作KQLの変換方法は[§3.4](#34-自作kqlをjson文字列にする)を参照してください。ファイルを置くだけで自動選択される仕組みではありません。
 
 | パターン | 貼り付け用 KQL | 対応する設定 JSON | 用途 |
 |---|---|---|---|
@@ -315,12 +316,82 @@ Disabled・Runningなしを確認し、Codeで外側 `parameters.MONTH_OVERRIDE.
 - 対象テーブルの存在、Analytics プラン、MI の閲覧権限、取り込み・保持期間を確認する。評価 LAW には実データの AzureActivity があるとは限らない。実データがなければ[ダミー試験](validation.md#2-実データ不要のダミーテスト)を使う。
 - 約 16 MiB / 500,000 行 / クエリ 100 秒・コネクタ 110 秒の制限と、サンプルの 500,000 行以上停止は変わらない。自動分割・任意 KQL の自動修正はない。
 
+### 3.4 自作KQLをJSON文字列にする
+
+**顧客が開発した別のKQLも、原文を1つのJSON文字列にして、外側の `parameters.KQL_BODY.value` へ設定します。** JSON化はKQLの内容を変更する作業ではありません。先に§3.3の月範囲・出力列・最後の `bag=pack_all()` を合わせ、改行された原文を控えてから変換します。ローカルコマンドやCloud Shellは不要です。業務KQLや実データを外部のJSON変換サイトへ貼り付けないでください。
+
+#### 変換する文字と順序
+
+| KQL原文にある文字 | CodeのJSON文字列内での書き方 |
+|---|---|
+| バックスラッシュ `\` | `\\` |
+| ダブルクォート `"` | `\"` |
+| Enterによる改行（LF） | `\n` |
+| Enterによる改行（CRLFをそのまま保持） | `\r\n` |
+| 実際のタブ文字 | `\t` |
+| シングルクォート `'`、日本語、`/`、`@`、パイプ `\|` | そのまま |
+
+手作業では、**原文の `\` → `\\`、原文の `"` → `\"`、実際の改行・タブ → 上表の表記**の順に変換し、最後に全体を半角の `"` で囲みます。後からもう一度すべての `\` を変換すると、追加したエスケープまで二重になるため行いません。変換対象はKQLの本文だけで、JSONのキーや既存定義全体には適用しません。
+
+**KQL内にすでにあるエスケープは、意味を解釈せず文字として保持します。** たとえば原文中の「バックスラッシュとn」の2文字 `\n` は、JSON内では `\\n` です。実際の改行を表す `\n` とは区別します。KQLの `@"C:\logs\sample.txt"` のような逐語的文字列も、JSON内では `@\"C:\\logs\\sample.txt\"` となります。KQL側の `@` はJSONのエスケープを不要にする記号ではありません。`'` に `\` を足した `\'` はJSONの有効なエスケープではないので使いません。
+
+**改行を全部削除したり、空白へ置き換えたりしないでください。** `//` の行コメントが次の処理まで取り込むなど、KQLの意味が変わる場合があります。KQL内の複数行文字列に含まれる改行・タブも元の内容を保持します。エディターの画面上の折り返しは実際の改行ではありません。JSON文字列内にEnterによる実改行を直接入れず、文字列の外のJSON整形用の改行とは分けて扱います。
+
+#### 原文とJSONの対応例
+
+実ログ不要の説明用KQLです。1行のダミーにパスと引用符を含め、JSON変換後も同じ内容になる例を示します。顧客の業務テーブルへ置き換える場合は、§3.3の条件を適用してください。
+
+**変換前：KQL原文**
+
+```kusto
+datatable(TimeGenerated:datetime, Path:string, Text:string)
+[
+  datetime(2026-01-15T00:00:00Z), @"C:\logs\sample.txt", '処理 "完了"'
+]
+// 対象月のデータだけを出力
+| where TimeGenerated >= start and TimeGenerated < end
+| project TimeGenerated, Path, Text
+| project bag=pack_all()
+```
+
+**変換後：Code用のJSON文字列**
+
+```json
+"datatable(TimeGenerated:datetime, Path:string, Text:string)\n[\n  datetime(2026-01-15T00:00:00Z), @\"C:\\logs\\sample.txt\", '処理 \"完了\"'\n]\n// 対象月のデータだけを出力\n| where TimeGenerated >= start and TimeGenerated < end\n| project TimeGenerated, Path, Text\n| project bag=pack_all()"
+```
+
+概要 → Edit → Codeで、外側 `parameters.KQL_BODY` の `"value":` の後の**既存文字列全体（開始・終了の `"` を含む）だけ**を上の文字列へ置き換えます。`"value":` と外側の括弧・区切りのカンマは保持します。すでにJSON化された文字列をコピーする場合は追加の変換をしません。上の1行をワークフロー全体や `definition.parameters` へ貼り付けないでください。
+
+この例を試す場合、外側 `parameters.COLUMNS.value` は次の配列です。JSON文字列にせず配列の型を維持します。
+
+```json
+["TimeGenerated","Path","Text"]
+```
+
+`definition.actions.Export.actions.Create_CSV_table.inputs.columns` も次の配列へ合わせます。試験対象月は外側 `parameters.MONTH_OVERRIDE.value` に文字列 `"2026-01"` を指定します。
+
+```json
+[
+  {"header":"TimeGenerated","value":"@item()['TimeGenerated']"},
+  {"header":"Path","value":"@item()['Path']"},
+  {"header":"Text","value":"@item()['Text']"}
+]
+```
+
+#### 公開・実行時の確認
+
+操作は[§4](#4-portal-で切り替える)の停止・保全 → Publish → 公開済み値の確認 → 通常Runに従います。JSONの構文エラーは公開前に修正します。JSONが正しくてもKQLの構文・権限・結果が正しいとは限りません。
+
+実行履歴の `QueryText` で、自動追加されたstart / endの後の本文が元のKQLと同じか照合します。QueryTextを**JSONとして表示している場合は、改行や引用符が再びエスケープ表示**されます。表示上の `\n` だけで二重変換と判断せず、文字列としての内容を確認します。上の例は2026-01なら1行、Pathは `C:\logs\sample.txt`、Textは `処理 "完了"` です。CSV内の引用符はCSVの規則で二重化されるため、JSONの `\"` と混同しません。列・件数・保存読み戻し・manifest / currentも確認し、試験後は元設定へ戻すか、本番KQL・空の対象月・承認済み予定へ切り替えます。
+
+公式：[JSONの特殊文字・制御文字のエスケープ表](https://learn.microsoft.com/en-us/sql/relational-databases/json/how-for-json-escapes-special-characters-and-control-characters-sql-server)、[KQLの文字列リテラルと逐語的文字列](https://learn.microsoft.com/en-us/kusto/query/scalar-data-types/string?view=azure-monitor)、[Logic Appsのコード編集](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-author-definitions)。エスケープ表のリンクは記法の参照用であり、SQLを使う手順ではありません。
+
 ## 4. portal で切り替える
 
 1. Logic App を **Disabled** にし、Running がないことを確認する。現在の KQL、列、対象月、有効状態、公開済みの定義全体を台帳へ控える。
 2. 対象パターンの `.kql` と対応する `COLUMNS` を上表から選ぶ。まず試験対象月を `MONTH_OVERRIDE` に指定する。
 3. Logic App の **パラメーター**画面で実際の値を編集できる場合は、`KQL_BODY` に `.kql` 本文を、`COLUMNS` に対応する配列を入力する。KQL 本文入力欄には JSON の外側の引用符や `\n` を貼らず、改行された本文を使う。**Actual value が編集不可の場合は次のコードビューを使い、Default value だけを変更して代替しない。** 外側の設定値がある場合、既定値を変更しても実際の値は置き換わらない。
-4. パラメーター画面から編集できない場合は **開発ツール → ロジック アプリ コード ビュー**で、外側の `parameters.KQL_BODY.value` と `parameters.COLUMNS.value` を変更する。JSON 文字列では改行・引用符のエスケープが必要なため、対応する `.json` の **この 2 項目だけ**を転記する。`MONTH_OVERRIDE` は試験対象月を別途指定する。
+4. パラメーター画面から編集できない場合は **概要 → Edit → Code**で、外側の `parameters.KQL_BODY.value` と `parameters.COLUMNS.value` を変更する（開発ツール → ロジック アプリ コード ビューが表示される版ではそこからも編集可）。同梱例は対応する `.json` の **この2項目の値だけ**を転記する。**顧客独自のKQLは[§3.4](#34-自作kqlをjson文字列にする)でJSON文字列へ変換する。** `MONTH_OVERRIDE` は試験対象月を別途指定する。
 
    **列の名前・数・順序が変わる場合は追加で**、デザイナーの `Export → Create_CSV_table` を開き、**列 / Columns をカスタム / Custom**にする。ヘッダーと対応する値の式を `COLUMNS` と同じ順で設定する。コードビューの場合は `definition.actions.Export.actions.Create_CSV_table.inputs.columns` を、対応する `.csv-columns.json` の配列で置き換える。他の入力や `runAfter` を消さない。たとえば操作別集計は次の配列を使う。
 
