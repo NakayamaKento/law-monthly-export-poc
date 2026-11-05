@@ -1216,3 +1216,32 @@ KQL手順は、Actual valueが参照専用であるという既存のPortal画�
 2026-11-05、`node --test scripts/customer.test.mjs` は **27 / 27 成功**。`node scripts/build-customer.mjs --check`、`git diff --check`も成功。配布JSON・ワークフロー定義・KQLは変更していない。Azure環境での作成・設定・公開・実行は行っていない。
 
 初回ラバーダックレビューで、第1段階のStorage出力から第2段階入力への受け渡しが間接的、相談先の役割が曖昧、current / manifest / run の用語がREADMEで説明されていないとの指摘があった。導入表に出力名と入力欄名の対応を明示し、exports IDはStorage名欄に使わないことを追記。READMEに迷ったときの相談先と用語を追加した。修正後の最終確認で前回指摘の解消を確認し、重大な迷い・矛盾はないとの結果を得た。ZIP展開やGitHub Rawの実画面、Azure portalの版差による画面位置、JSONコピー時の改行・BOM保持はこの資料レビューでは実操作していない。
+
+## 43. 新規専用RGでの再検証開始とPortal障害（2026-11-05 JST、再挑戦完了）
+
+### 実施したこと
+
+既存LAWを取得元として使う現行顧客手順に沿い、新しい専用RGで3列ダミーの実行後にPerf形式ダミーへ切り替えて試験する作業を再開した。Portalのサブスクリプション一覧で、指定LAWのサブスクリプションIDに対応する表示名を確認し、Southeast Asiaに専用RGを作成した。作成成功通知を確認した。
+
+### 初回のPortal障害と停止位置
+
+カスタムテンプレート編集ブレードのファイル読み込み時に `setEditorValue` がnullという画面エラーが発生した。ファイル選択後にReact iframeが切り離され、再読み込み後もReactFrameの読み込みが複数回失敗したため、テンプレート本文を保存できず第1段階のデプロイを開始していない。Azure ARM MCPも認証トークンを取得できず、別の認証方法やCLIへ迂回していない。
+
+この時点では作成したAzure資源は専用RGのみであり、Storage、Logic App、接続、ロール割り当て、LAW側デプロイ記録の作成、Publish、Run、既存LAWの設定変更はなかった。失敗したテンプレート投入やデプロイは成功扱いにしない。
+
+### 再挑戦・実測結果
+
+同じサインイン済みPortalで再挑戦し、現行の第1～3段階を専用RGへデプロイした。初回からStorageのPublic network access Disabled、Deny、信頼されたサービス例外、共有キー・匿名アクセス無効を確認し、試験中は設定を変更していない。指定された既存LAWにシステム割り当てマネージドIDのReader権限を付与した。既存LAW本体の設定は変更していない。
+
+| 手動Run | JST開始 | 結果 | 確認内容 |
+|---|---|---|---|
+| 3列ダミー | 22:48:35 | Succeeded、5.81秒 | 4行 |
+| Perf形式ダミー、対象月2026-01 | 23:25:12 | Succeeded、3.95秒 | 2行、UTC日次平均20 / 50、固定4列 |
+
+Perf形式のQuery出力は `2026-01-15T00:00:00Z` の平均20と `2026-01-16T00:00:00Z` の平均50。`RowCount=2`、CSVヘッダーは `TimeGenerated,_ResourceId,Computer,AvgCounterValue` で、Create CSV tableの出力は2行だった。Upload CSV、Read Back CSV、Check Read Back CSV、Upload Manifest、Upload CurrentはSucceeded。Check Read Back CSVの `expressionResult=false` は、空または不一致を検出する条件に該当しなかったことを表す正常値である。Manifestの `rowCount=2` と `csvReadBackVerified=true`、currentのrun参照も確認した。保存されたCSVはUTF-8 BOM、固定ヘッダー、2行の内容で、読み戻し本文と生成内容が一致した。
+
+これは `datatable` を使ったダミー試験であり、本番Perf KQLを実ログへ実行した結果ではない。0件、意図的な列不整合、操作者による独立CSV取得も今回の専用環境では追加実施していない。
+
+### 復元・後片付け
+
+試験後はワークフローをDisabledにし、実行履歴がSucceeded 2件・Failed 0件でRunningがないことを確認した。既存LAWの今回Reader割り当てだけを削除し、既存の割り当ては保持した。専用RGにあったLogic App、Storage、2つのAPI connection、StorageのEvent Grid system topicを含む5資源をPortalから削除した。削除中にリソース一覧が0件となり、再読み込み後に対象RGの404を確認した。既存LAW本体、既存LAWのRG、別の手作業検証環境は変更・削除していない。
